@@ -169,7 +169,7 @@ async function merge(jobId: string, files: Array<{ name: string; bytes: ArrayBuf
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
     postProgress(jobId, 10 + Math.floor((i / files.length) * 60), `Importing ${f.name}…`);
-    const doc = await PDFDocument.load(f.bytes);
+    const doc = await PDFDocument.load(f.bytes, { ignoreEncryption: true });
     const pages = await out.copyPages(doc, doc.getPageIndices());
     pages.forEach((p) => out.addPage(p));
   }
@@ -182,7 +182,7 @@ async function merge(jobId: string, files: Array<{ name: string; bytes: ArrayBuf
 
 async function split(jobId: string, file: { name: string; bytes: ArrayBuffer }, pages: number[], ranges: number[][], output: "single" | "zip") {
   postProgress(jobId, 5, "Loading PDF…");
-  const src = await PDFDocument.load(file.bytes);
+  const src = await PDFDocument.load(file.bytes, { ignoreEncryption: true });
   const pageCount = src.getPageCount();
   const normalize = (list: number[]) =>
     Array.from(new Set(list.map((p) => p - 1).filter((p) => p >= 0 && p < pageCount))).sort((a, b) => a - b);
