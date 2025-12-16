@@ -45,6 +45,7 @@ const worker = new Worker(new URL("./worker/engine.worker.ts", import.meta.url),
 let activeTool: ToolId = "merge";
 let files: File[] = [];
 let jobs: Job[] = [];
+let draggingIdx: number | null = null;
 
 let compressLevel: "small"|"balanced"|"best" = "balanced";
 let splitPages = "1";
@@ -181,6 +182,14 @@ function removeFile(idx: number) {
   render();
 }
 
+function moveFile(from: number, to: number) {
+  if (from === to || from < 0 || to < 0 || from >= files.length || to >= files.length) return;
+  const next = [...files];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  files = next;
+}
+
 function clearFiles() {
   files = [];
   render();
@@ -240,8 +249,10 @@ function render() {
             </div>
 
             <div class="files" id="files">
+              ${activeTool === "merge" && files.length > 1 ? `<div class="small" style="margin-bottom:2px;">Arrastra los nombres para reordenar antes de combinar.</div>` : ""}
               ${files.length === 0 ? `<div class="small">No files selected.</div>` : files.map((f, idx) => `
-                <div class="fileRow">
+                <div class="fileRow" data-idx="${idx}">
+                  ${activeTool === "merge" && files.length > 1 ? `<div class="dragHandle" title="Drag to reorder" aria-hidden="true">↕</div>` : ""}
                   <div class="icon">📄</div>
                   <div class="fileInfo">
                     <div class="fileName">${f.name}</div>
@@ -405,6 +416,43 @@ function render() {
     b.onclick = () => {
       const job = jobs.find(j => j.id === b.dataset.dl);
       if (job?.outputBlob && job.outputName) downloadBlob(job.outputBlob, job.outputName);
+    };
+  });
+
+  // reordering files (merge)
+  const rows = document.querySelectorAll<HTMLDivElement>(".fileRow[data-idx]");
+  rows.forEach(row => {
+    const idx = Number(row.dataset.idx);
+    const canReorder = activeTool === "merge" && files.length > 1;
+    row.draggable = canReorder;
+    if (!canReorder) return;
+
+    row.ondragstart = (e) => {
+      draggingIdx = idx;
+      row.classList.add("dragging");
+      e.dataTransfer?.setData("text/plain", String(idx));
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    };
+    row.ondragend = () => {
+      draggingIdx = null;
+      row.classList.remove("dragging");
+      rows.forEach(r => r.classList.remove("dropTarget"));
+    };
+    row.ondragover = (e) => {
+      if (draggingIdx === null || draggingIdx === idx) return;
+      e.preventDefault();
+      row.classList.add("dropTarget");
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    };
+    row.ondragleave = () => row.classList.remove("dropTarget");
+    row.ondrop = (e) => {
+      e.preventDefault();
+      row.classList.remove("dropTarget");
+      const from = draggingIdx ?? Number(e.dataTransfer?.getData("text/plain"));
+      const to = idx;
+      draggingIdx = null;
+      if (Number.isFinite(from)) moveFile(Number(from), to);
+      render();
     };
   });
 }

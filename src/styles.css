@@ -116,6 +116,7 @@ body{
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 10px;
+  transition: transform .08s ease, box-shadow .08s ease, border-color .08s ease;
 }
 .fileName{font-size: 13px; font-weight: 650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .fileMeta{font-size: 11px; color: var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
@@ -132,3 +133,21 @@ body{
 .jobRow{border:1px solid var(--border); border-radius: var(--r); padding: 12px; background:#fff;}
 .kv{font-size: 11px; color: var(--muted);}
 .err{border:1px solid #fecaca; background:#fff1f2; color:#991b1b; padding: 8px 10px; border-radius: 14px; font-size: 12px; margin-top: 8px;}
+.dragHandle{
+  width: 22px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor: grab;
+  color: var(--muted);
+  user-select: none;
+}
+.fileRow.dragging{
+  opacity:.7;
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 24px rgba(0,0,0,.06);
+}
+.fileRow.dropTarget{
+  border-color: #111827;
+  background: #f8fafc;
+}
