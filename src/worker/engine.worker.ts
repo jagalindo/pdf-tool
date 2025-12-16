@@ -25,6 +25,28 @@ const qpdfWasmUrl = resolveWasmUrl(rawQpdfWasmUrl);
 let qpdfReady: Promise<any> | null = null;
 let qpdfRunId = 0;
 
+function describeError(err: any) {
+  if (!err) return "unknown error";
+  if (typeof err === "string") return err;
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "object") {
+    const parts: string[] = [];
+    if (typeof (err as any).message === "string" && (err as any).message) parts.push((err as any).message);
+    if ((err as any).status !== undefined) parts.push(`status ${String((err as any).status)}`);
+    if (parts.length) return parts.join(" ");
+    try {
+      return JSON.stringify(err);
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    return String(err);
+  } catch {
+    return "unknown error";
+  }
+}
+
 async function getQpdf() {
   if (!qpdfReady) {
     qpdfReady = (async () => {
@@ -53,6 +75,19 @@ async function getQpdf() {
 
 async function decryptPdf(bytes: ArrayBuffer, password?: string, label?: string): Promise<Uint8Array> {
   const qpdf = await getQpdf();
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const origPrint = (qpdf as any).print;
+  const origPrintErr = (qpdf as any).printErr;
+  (qpdf as any).print = (line: any) => {
+    if (line !== undefined && line !== null) stdout.push(String(line));
+    if (typeof origPrint === "function") origPrint(line);
+  };
+  (qpdf as any).printErr = (line: any) => {
+    if (line !== undefined && line !== null) stderr.push(String(line));
+    if (typeof origPrintErr === "function") origPrintErr(line);
+  };
+
   const inName = `in_${++qpdfRunId}.pdf`;
   const outName = `out_${qpdfRunId}.pdf`;
   try {
@@ -64,12 +99,15 @@ async function decryptPdf(bytes: ArrayBuffer, password?: string, label?: string)
     if (!outBytes) throw new Error("Decryption produced no output.");
     return outBytes;
   } catch (err: any) {
-    const msg = err?.message ?? String(err);
-    if (/password/i.test(msg)) {
+    const log = (stderr.join("\n").trim() || stdout.join("\n").trim());
+    const msg = [describeError(err), log].filter(Boolean).join(": ");
+    if (/password|encrypted|encryption/i.test(msg)) {
       throw new Error(`"${label ?? "PDF"}" is password-protected. Provide the correct password and try again.`);
     }
-    throw new Error(`Failed to open ${label ?? "PDF"} (${msg})`);
+    throw new Error(`Failed to open ${label ?? "PDF"} (${msg || "unknown error"})`);
   } finally {
+    (qpdf as any).print = origPrint;
+    (qpdf as any).printErr = origPrintErr;
     try {
       qpdf.FS.unlink(`/in/${inName}`);
       qpdf.FS.unlink(`/out/${outName}`);
