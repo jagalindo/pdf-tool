@@ -22,6 +22,63 @@ const rawQpdfWasmUrl = new URL("../../node_modules/@neslinesli93/qpdf-wasm/dist/
 const mupdfWasmUrl = resolveWasmUrl(rawMupdfWasmUrl);
 const qpdfWasmUrl = resolveWasmUrl(rawQpdfWasmUrl);
 
+let qpdfReady: Promise<any> | null = null;
+let qpdfRunId = 0;
+
+async function getQpdf() {
+  if (!qpdfReady) {
+    qpdfReady = (async () => {
+      const qpdfMod: any = await import("@neslinesli93/qpdf-wasm");
+      const createQpdf = qpdfMod.default ?? qpdfMod;
+      if (typeof createQpdf !== "function") throw new Error("qpdf-wasm module factory not found.");
+      const qpdf = await createQpdf({
+        locateFile: (path: string) => (path.endsWith(".wasm") ? qpdfWasmUrl : path),
+        noInitialRun: true,
+        preRun: [
+          (mod: any) => {
+            try {
+              mod.FS.mkdir("/in");
+              mod.FS.mkdir("/out");
+            } catch {
+              /* ignore if exists */
+            }
+          },
+        ],
+      });
+      return qpdf;
+    })();
+  }
+  return qpdfReady;
+}
+
+async function decryptPdf(bytes: ArrayBuffer, password?: string, label?: string): Promise<Uint8Array> {
+  const qpdf = await getQpdf();
+  const inName = `in_${++qpdfRunId}.pdf`;
+  const outName = `out_${qpdfRunId}.pdf`;
+  try {
+    qpdf.FS.writeFile(`/in/${inName}`, new Uint8Array(bytes));
+    const pwdArg = password ? `--password=${password}` : "--password=";
+    const args = ["--decrypt", pwdArg, `/in/${inName}`, `/out/${outName}`];
+    qpdf.callMain(args);
+    const outBytes: Uint8Array | undefined = qpdf.FS.readFile(`/out/${outName}`);
+    if (!outBytes) throw new Error("Decryption produced no output.");
+    return outBytes;
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    if (/password/i.test(msg)) {
+      throw new Error(`"${label ?? "PDF"}" is password-protected. Provide the correct password and try again.`);
+    }
+    throw new Error(`Failed to open ${label ?? "PDF"} (${msg})`);
+  } finally {
+    try {
+      qpdf.FS.unlink(`/in/${inName}`);
+      qpdf.FS.unlink(`/out/${outName}`);
+    } catch {
+      /* ignore cleanup errors */
+    }
+  }
+}
+
 /**
  * Engine worker: runs CPU-heavy tasks off the main thread.
  * - Merge/Split via pdf-lib (JS, reliable)
@@ -162,14 +219,15 @@ function formatRangeLabel(nums: number[]) {
   return parts.join("_");
 }
 
-async function merge(jobId: string, files: Array<{ name: string; bytes: ArrayBuffer }>) {
+async function merge(jobId: string, files: Array<{ name: string; bytes: ArrayBuffer; password?: string }>) {
   postProgress(jobId, 5, "Loading PDFs…");
   const out = await PDFDocument.create();
 
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
     postProgress(jobId, 10 + Math.floor((i / files.length) * 60), `Importing ${f.name}…`);
-    const doc = await PDFDocument.load(f.bytes, { ignoreEncryption: true });
+    const unlocked = await decryptPdf(f.bytes, f.password, f.name);
+    const doc = await PDFDocument.load(unlocked, { ignoreEncryption: true });
     const pages = await out.copyPages(doc, doc.getPageIndices());
     pages.forEach((p) => out.addPage(p));
   }
@@ -180,9 +238,10 @@ async function merge(jobId: string, files: Array<{ name: string; bytes: ArrayBuf
   postResult(jobId, "merged.pdf", bytes.buffer, "application/pdf");
 }
 
-async function split(jobId: string, file: { name: string; bytes: ArrayBuffer }, pages: number[], ranges: number[][], output: "single" | "zip") {
+async function split(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, pages: number[], ranges: number[][], output: "single" | "zip") {
   postProgress(jobId, 5, "Loading PDF…");
-  const src = await PDFDocument.load(file.bytes, { ignoreEncryption: true });
+  const unlocked = await decryptPdf(file.bytes, file.password, file.name);
+  const src = await PDFDocument.load(unlocked, { ignoreEncryption: true });
   const pageCount = src.getPageCount();
   const normalize = (list: number[]) =>
     Array.from(new Set(list.map((p) => p - 1).filter((p) => p >= 0 && p < pageCount))).sort((a, b) => a - b);
@@ -230,28 +289,14 @@ async function split(jobId: string, file: { name: string; bytes: ArrayBuffer }, 
  * - Use qpdf (WASM) to rewrite the file with object streams and stream compression.
  * - This often reduces size a bit, and improves structure; not as strong as Ghostscript.
  */
-async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer }, level: "small"|"balanced"|"best") {
+async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, level: "small"|"balanced"|"best") {
   postProgress(jobId, 5, "Initializing qpdf (WASM)…");
 
-  const qpdfMod: any = await import("@neslinesli93/qpdf-wasm");
-  const createQpdf = qpdfMod.default ?? qpdfMod;
-  if (typeof createQpdf !== "function") throw new Error("qpdf-wasm module factory not found.");
+  const qpdf = await getQpdf();
+  const unlocked = await decryptPdf(file.bytes, file.password, file.name);
 
-  const qpdf = await createQpdf({
-    locateFile: (path: string) => (path.endsWith(".wasm") ? qpdfWasmUrl : path),
-    noInitialRun: true,
-    preRun: [
-      (mod: any) => {
-        try {
-          mod.FS.mkdir("/in");
-          mod.FS.mkdir("/out");
-        } catch { /* ignore if exists */ }
-      },
-    ],
-  });
-
-  const inName = "in.pdf";
-  const outName = "out.pdf";
+  const inName = `in_${++qpdfRunId}.pdf`;
+  const outName = `out_${qpdfRunId}.pdf`;
 
   // Map level to qpdf flags. These are conservative, broadly compatible.
   // - object streams + stream compression
@@ -269,7 +314,7 @@ async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer 
   const args = [...argsBase, ...levelArgs, `/in/${inName}`, `/out/${outName}`];
 
   postProgress(jobId, 30, "Rewriting PDF…");
-  qpdf.FS.writeFile(`/in/${inName}`, new Uint8Array(file.bytes));
+  qpdf.FS.writeFile(`/in/${inName}`, new Uint8Array(unlocked));
   qpdf.callMain(args);
 
   let outBytes: Uint8Array | undefined;
@@ -283,6 +328,13 @@ async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer 
     throw new Error("qpdf-wasm returned no output (out.pdf missing).");
   }
 
+  try {
+    qpdf.FS.unlink(`/in/${inName}`);
+    qpdf.FS.unlink(`/out/${outName}`);
+  } catch {
+    /* ignore cleanup errors */
+  }
+
   postProgress(jobId, 100, "Done");
   postResult(jobId, `compressed_${file.name.replace(/\.pdf$/i, "")}.pdf`, outBytes.buffer, "application/pdf");
 }
@@ -292,7 +344,7 @@ async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer 
  * Uses official MuPDF.js (WASM).
  * Now outputs a ZIP with all pages as PNG/JPG.
  */
-async function pdf2img(jobId: string, file: { name: string; bytes: ArrayBuffer }, format: "png"|"jpg", dpi: number) {
+async function pdf2img(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, format: "png"|"jpg", dpi: number) {
   postProgress(jobId, 5, "Initializing MuPDF (WASM)…");
   // Ensure WASM is fetched from the correct URL (respects Vite base).
   (globalThis as any)["$libmupdf_wasm_Module"] = {
@@ -300,7 +352,8 @@ async function pdf2img(jobId: string, file: { name: string; bytes: ArrayBuffer }
   };
   const mupdf: any = await import("mupdf"); // ESM-only per docs
 
-  const doc = mupdf.Document.openDocument(file.bytes, "pdf");
+  const unlocked = await decryptPdf(file.bytes, file.password, file.name);
+  const doc = mupdf.Document.openDocument(unlocked, "pdf");
   const total = doc.countPages();
   if (!total) throw new Error("PDF has no pages.");
 

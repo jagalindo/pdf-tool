@@ -1,10 +1,10 @@
 import type { ToolId } from "../types";
 
 export type WorkerRequest =
-  | { type: "merge"; jobId: string; files: Array<{ name: string; bytes: ArrayBuffer }> }
-  | { type: "split"; jobId: string; file: { name: string; bytes: ArrayBuffer }; pages: number[]; ranges: number[][]; output: "single" | "zip" }
-  | { type: "compress"; jobId: string; file: { name: string; bytes: ArrayBuffer }; level: "small" | "balanced" | "best" }
-  | { type: "pdf2img"; jobId: string; file: { name: string; bytes: ArrayBuffer }; format: "png" | "jpg"; dpi: number };
+  | { type: "merge"; jobId: string; files: Array<{ name: string; bytes: ArrayBuffer; password?: string }> }
+  | { type: "split"; jobId: string; file: { name: string; bytes: ArrayBuffer; password?: string }; pages: number[]; ranges: number[][]; output: "single" | "zip" }
+  | { type: "compress"; jobId: string; file: { name: string; bytes: ArrayBuffer; password?: string }; level: "small" | "balanced" | "best" }
+  | { type: "pdf2img"; jobId: string; file: { name: string; bytes: ArrayBuffer; password?: string }; format: "png" | "jpg"; dpi: number };
 
 export type WorkerEvent =
   | { type: "progress"; jobId: string; progress: number; note?: string }

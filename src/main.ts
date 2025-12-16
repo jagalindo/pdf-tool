@@ -2,6 +2,8 @@ import "./styles.css";
 import type { Job, ToolDef, ToolId } from "./types";
 import type { WorkerEvent, WorkerRequest } from "./worker/messages";
 
+type SelectedFile = { file: File; key: string; password: string };
+
 const TOOLS: ToolDef[] = [
   { id: "merge", title: "Merge PDFs", subtitle: "Combine multiple PDFs into one", tags: ["PDF", "Offline", "Fast"], accepts: "pdf", output: "pdf" },
   { id: "split", title: "Split PDF", subtitle: "Extract selected pages (usa 1,3,5-7; salida PDF único o ZIP)", tags: ["Pages", "Offline", "ZIP"], accepts: "pdf", output: "pdf" },
@@ -43,7 +45,7 @@ const worker = new Worker(new URL("./worker/engine.worker.ts", import.meta.url),
 
 // State
 let activeTool: ToolId = "merge";
-let files: File[] = [];
+let files: SelectedFile[] = [];
 let jobs: Job[] = [];
 let draggingIdx: number | null = null;
 
@@ -102,6 +104,14 @@ async function readFileBytes(f: File): Promise<ArrayBuffer> {
   return await f.arrayBuffer();
 }
 
+function makeKey(f: File) {
+  return `${f.name}:${f.size}:${f.lastModified}`;
+}
+
+function escapeAttr(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 async function runJob() {
   if (files.length === 0) return alert("Add PDFs first.");
 
@@ -124,7 +134,13 @@ async function runJob() {
 
   try {
     if (activeTool === "merge") {
-      const payload = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: await readFileBytes(f) })));
+      const payload = await Promise.all(
+        files.map(async (f) => ({
+          name: f.file.name,
+          bytes: await readFileBytes(f.file),
+          password: f.password?.trim() || undefined,
+        }))
+      );
       const req: WorkerRequest = { type: "merge", jobId, files: payload };
       worker.postMessage(req, payload.map(p => p.bytes));
       return;
@@ -135,7 +151,7 @@ async function runJob() {
       const req: WorkerRequest = {
         type: "split",
         jobId,
-        file: { name: f.name, bytes: await readFileBytes(f) },
+        file: { name: f.file.name, bytes: await readFileBytes(f.file), password: f.password?.trim() || undefined },
         pages: flat,
         ranges: groups.length ? groups : [flat],
         output: splitOutput,
@@ -145,13 +161,13 @@ async function runJob() {
     }
     if (activeTool === "compress") {
       const f = files[0];
-      const req: WorkerRequest = { type: "compress", jobId, file: { name: f.name, bytes: await readFileBytes(f) }, level: compressLevel };
+      const req: WorkerRequest = { type: "compress", jobId, file: { name: f.file.name, bytes: await readFileBytes(f.file), password: f.password?.trim() || undefined }, level: compressLevel };
       worker.postMessage(req, [ (req as any).file.bytes ]);
       return;
     }
     if (activeTool === "pdf2img") {
       const f = files[0];
-      const req: WorkerRequest = { type: "pdf2img", jobId, file: { name: f.name, bytes: await readFileBytes(f) }, format: imgFormat, dpi: imgDpi };
+      const req: WorkerRequest = { type: "pdf2img", jobId, file: { name: f.file.name, bytes: await readFileBytes(f.file), password: f.password?.trim() || undefined }, format: imgFormat, dpi: imgDpi };
       worker.postMessage(req, [ (req as any).file.bytes ]);
       return;
     }
@@ -171,8 +187,12 @@ function onFilesChosen(list: FileList | null) {
   if (!list) return;
   const next = Array.from(list).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
   if (next.length !== list.length) alert("Only PDFs are accepted in this demo.");
-  const map = new Map(files.map(f => [`${f.name}:${f.size}`, f]));
-  for (const f of next) map.set(`${f.name}:${f.size}`, f);
+  const map = new Map(files.map(f => [f.key, f]));
+  for (const f of next) {
+    const key = makeKey(f);
+    const prev = map.get(key);
+    map.set(key, prev ? { ...prev, file: f } : { file: f, key, password: "" });
+  }
   files = Array.from(map.values());
   render();
 }
@@ -255,9 +275,15 @@ function render() {
                   ${activeTool === "merge" && files.length > 1 ? `<div class="dragHandle" title="Drag to reorder" aria-hidden="true">↕</div>` : ""}
                   <div class="icon">📄</div>
                   <div class="fileInfo">
-                    <div class="fileName">${f.name}</div>
-                    <div class="fileMeta">${prettyBytes(f.size)}</div>
+                    <div class="fileName">${f.file.name}</div>
+                    <div class="fileMeta">${prettyBytes(f.file.size)}</div>
                   </div>
+                  ${activeTool === "merge" ? `
+                    <div class="filePassword">
+                      <input class="input" data-pass="${idx}" value="${escapeAttr(f.password ?? "")}" placeholder="Password (if protected)" autocomplete="off" />
+                      <div class="small">Solo en tu navegador.</div>
+                    </div>
+                  ` : ""}
                   <button class="btn" data-rm="${idx}">Remove</button>
                 </div>
               `).join("")}
@@ -400,6 +426,13 @@ function render() {
 
   const dpi = document.getElementById("dpi") as HTMLInputElement | null;
   if (dpi) dpi.oninput = () => { imgDpi = Number(dpi.value) || 150; };
+
+  document.querySelectorAll<HTMLInputElement>("[data-pass]").forEach(inp => {
+    inp.oninput = () => {
+      const idx = Number(inp.dataset.pass);
+      if (Number.isFinite(idx) && files[idx]) files[idx] = { ...files[idx], password: inp.value };
+    };
+  });
 
   // drag and drop
   const drop = document.getElementById("drop")!;
