@@ -18,7 +18,9 @@ export type Job = {
   createdAt: number;
   status: JobStatus;
   progress: number;
+  progressNote?: string;
   inputCount: number;
+  inputSize?: number;
   outputName?: string;
   outputBlob?: Blob;
   error?: string;
