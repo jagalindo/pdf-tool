@@ -243,6 +243,29 @@ body{
   color: var(--err-text);
   margin-top: 4px;
 }
+.validationHint.warn{
+  color: #b45309;
+}
+[data-theme="dark"] .validationHint.warn{
+  color: #fbbf24;
+}
+.validationHint.ok{
+  color: var(--success-text);
+}
+.input.invalid{
+  border-color: var(--err-text);
+}
+.input.valid{
+  border-color: var(--success-text);
+}
+.fileWarning{
+  font-size: 11px;
+  color: #b45309;
+  margin-top: 2px;
+}
+[data-theme="dark"] .fileWarning{
+  color: #fbbf24;
+}
 .loadingDots::after{
   content: '';
   animation: dots 1.5s steps(4, end) infinite;
