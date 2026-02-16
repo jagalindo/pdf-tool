@@ -26,7 +26,7 @@ let qpdfReady: Promise<any> | null = null;
 let qpdfRunId = 0;
 
 function describeError(err: any) {
-  if (!err) return "unknown error";
+  if (!err) return "error desconocido";
   if (typeof err === "string") return err;
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === "object") {
@@ -43,7 +43,7 @@ function describeError(err: any) {
   try {
     return String(err);
   } catch {
-    return "unknown error";
+    return "error desconocido";
   }
 }
 
@@ -52,7 +52,7 @@ async function getQpdf() {
     qpdfReady = (async () => {
       const qpdfMod: any = await import("@neslinesli93/qpdf-wasm");
       const createQpdf = qpdfMod.default ?? qpdfMod;
-      if (typeof createQpdf !== "function") throw new Error("qpdf-wasm module factory not found.");
+      if (typeof createQpdf !== "function") throw new Error("No se encontró el módulo qpdf-wasm.");
       const qpdf = await createQpdf({
         locateFile: (path: string) => (path.endsWith(".wasm") ? qpdfWasmUrl : path),
         noInitialRun: true,
@@ -96,15 +96,15 @@ async function decryptPdf(bytes: ArrayBuffer, password?: string, label?: string)
     const args = ["--decrypt", pwdArg, `/in/${inName}`, `/out/${outName}`];
     qpdf.callMain(args);
     const outBytes: Uint8Array | undefined = qpdf.FS.readFile(`/out/${outName}`);
-    if (!outBytes) throw new Error("Decryption produced no output.");
+    if (!outBytes) throw new Error("La desencriptación no produjo salida.");
     return outBytes;
   } catch (err: any) {
     const log = (stderr.join("\n").trim() || stdout.join("\n").trim());
     const msg = [describeError(err), log].filter(Boolean).join(": ");
     if (/password|encrypted|encryption/i.test(msg)) {
-      throw new Error(`"${label ?? "PDF"}" is password-protected. Provide the correct password and try again.`);
+      throw new Error(`"${label ?? "PDF"}" está protegido con contraseña. Proporciona la contraseña correcta e intenta de nuevo.`);
     }
-    throw new Error(`Failed to open ${label ?? "PDF"} (${msg || "unknown error"})`);
+    throw new Error(`No se pudo abrir ${label ?? "PDF"} (${msg || "error desconocido"})`);
   } finally {
     (qpdf as any).print = origPrint;
     (qpdf as any).printErr = origPrintErr;
@@ -116,17 +116,6 @@ async function decryptPdf(bytes: ArrayBuffer, password?: string, label?: string)
     }
   }
 }
-
-/**
- * Engine worker: runs CPU-heavy tasks off the main thread.
- * - Merge/Split via pdf-lib (JS, reliable)
- * - Compress via qpdf-wasm (WASM) with reasonable defaults
- * - PDF->Images via MuPDF (WASM)
- *
- * Notes:
- * - This is 100% client-side: files never leave the browser.
- * - Some WASM engines are large; first run may take a few seconds to initialize.
- */
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -167,10 +156,6 @@ function dosDateTime(d = new Date()) {
   return { time: time & 0xffff, date: date & 0xffff };
 }
 
-/**
- * Minimal ZIP (store) encoder.
- * Avoids external deps; enough for small batches of images.
- */
 function buildZip(entries: Array<{ name: string; data: Uint8Array }>): Uint8Array {
   const encoder = new TextEncoder();
   const locals: Uint8Array[] = [];
@@ -184,39 +169,39 @@ function buildZip(entries: Array<{ name: string; data: Uint8Array }>): Uint8Arra
 
     const local = new Uint8Array(30 + nameBytes.length);
     const l = new DataView(local.buffer);
-    l.setUint32(0, 0x04034b50, true); // local header signature
-    l.setUint16(4, 20, true); // version needed
-    l.setUint16(6, 0, true); // flags
-    l.setUint16(8, 0, true); // method: store
+    l.setUint32(0, 0x04034b50, true);
+    l.setUint16(4, 20, true);
+    l.setUint16(6, 0, true);
+    l.setUint16(8, 0, true);
     l.setUint16(10, time, true);
     l.setUint16(12, date, true);
     l.setUint32(14, crc, true);
     l.setUint32(18, entry.data.length, true);
     l.setUint32(22, entry.data.length, true);
     l.setUint16(26, nameBytes.length, true);
-    l.setUint16(28, 0, true); // extra len
+    l.setUint16(28, 0, true);
     local.set(nameBytes, 30);
 
     locals.push(local, entry.data);
 
     const central = new Uint8Array(46 + nameBytes.length);
     const c = new DataView(central.buffer);
-    c.setUint32(0, 0x02014b50, true); // central header signature
-    c.setUint16(4, 20, true); // version made by
-    c.setUint16(6, 20, true); // version needed
-    c.setUint16(8, 0, true); // flags
-    c.setUint16(10, 0, true); // method
+    c.setUint32(0, 0x02014b50, true);
+    c.setUint16(4, 20, true);
+    c.setUint16(6, 20, true);
+    c.setUint16(8, 0, true);
+    c.setUint16(10, 0, true);
     c.setUint16(12, time, true);
     c.setUint16(14, date, true);
     c.setUint32(16, crc, true);
     c.setUint32(20, entry.data.length, true);
     c.setUint32(24, entry.data.length, true);
     c.setUint16(28, nameBytes.length, true);
-    c.setUint16(30, 0, true); // extra len
-    c.setUint16(32, 0, true); // comment len
-    c.setUint16(34, 0, true); // disk start
-    c.setUint16(36, 0, true); // internal attrs
-    c.setUint32(38, 0, true); // external attrs
+    c.setUint16(30, 0, true);
+    c.setUint16(32, 0, true);
+    c.setUint16(34, 0, true);
+    c.setUint16(36, 0, true);
+    c.setUint32(38, 0, true);
     c.setUint32(42, offset, true);
     central.set(nameBytes, 46);
 
@@ -227,14 +212,14 @@ function buildZip(entries: Array<{ name: string; data: Uint8Array }>): Uint8Arra
   const centralDir = concatBytes(centrals);
   const end = new Uint8Array(22);
   const e = new DataView(end.buffer);
-  e.setUint32(0, 0x06054b50, true); // end of central dir signature
-  e.setUint16(4, 0, true); // disk number
-  e.setUint16(6, 0, true); // start disk
+  e.setUint32(0, 0x06054b50, true);
+  e.setUint16(4, 0, true);
+  e.setUint16(6, 0, true);
   e.setUint16(8, entries.length, true);
   e.setUint16(10, entries.length, true);
   e.setUint32(12, centralDir.length, true);
   e.setUint32(16, offset, true);
-  e.setUint16(20, 0, true); // comment length
+  e.setUint16(20, 0, true);
 
   return concatBytes([...locals, centralDir, end]);
 }
@@ -258,26 +243,26 @@ function formatRangeLabel(nums: number[]) {
 }
 
 async function merge(jobId: string, files: Array<{ name: string; bytes: ArrayBuffer; password?: string }>) {
-  postProgress(jobId, 5, "Loading PDFs…");
+  postProgress(jobId, 5, "Cargando PDFs\u2026");
   const out = await PDFDocument.create();
 
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
-    postProgress(jobId, 10 + Math.floor((i / files.length) * 60), `Importing ${f.name}…`);
+    postProgress(jobId, 10 + Math.floor((i / files.length) * 60), `Importando ${f.name}\u2026`);
     const unlocked = await decryptPdf(f.bytes, f.password, f.name);
     const doc = await PDFDocument.load(unlocked, { ignoreEncryption: true });
     const pages = await out.copyPages(doc, doc.getPageIndices());
     pages.forEach((p) => out.addPage(p));
   }
 
-  postProgress(jobId, 80, "Saving…");
+  postProgress(jobId, 80, "Guardando\u2026");
   const bytes = await out.save({ useObjectStreams: true });
-  postProgress(jobId, 100, "Done");
-  postResult(jobId, "merged.pdf", bytes.buffer, "application/pdf");
+  postProgress(jobId, 100, "Listo");
+  postResult(jobId, "combinado.pdf", bytes.buffer as ArrayBuffer, "application/pdf");
 }
 
 async function split(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, pages: number[], ranges: number[][], output: "single" | "zip") {
-  postProgress(jobId, 5, "Loading PDF…");
+  postProgress(jobId, 5, "Cargando PDF\u2026");
   const unlocked = await decryptPdf(file.bytes, file.password, file.name);
   const src = await PDFDocument.load(unlocked, { ignoreEncryption: true });
   const pageCount = src.getPageCount();
@@ -285,73 +270,78 @@ async function split(jobId: string, file: { name: string; bytes: ArrayBuffer; pa
     Array.from(new Set(list.map((p) => p - 1).filter((p) => p >= 0 && p < pageCount))).sort((a, b) => a - b);
   const indices = normalize(pages);
 
-  if (indices.length === 0) throw new Error("No valid pages selected.");
+  if (indices.length === 0) throw new Error(`No hay páginas válidas. El PDF tiene ${pageCount} página(s).`);
 
   if (output === "zip") {
     const entries: Array<{ name: string; data: Uint8Array }> = [];
-    const base = file.name.replace(/\.pdf$/i, "") || "document";
+    const base = file.name.replace(/\.pdf$/i, "") || "documento";
     const normalizedRanges = (ranges?.length ? ranges : [pages]).map(normalize).filter((r) => r.length);
 
     for (let i = 0; i < normalizedRanges.length; i++) {
       const range = normalizedRanges[i];
       const humanPages = range.map((p) => p + 1);
-      postProgress(jobId, 10 + Math.floor((i / normalizedRanges.length) * 60), `Extrayendo páginas ${humanPages.join(",")}…`);
+      postProgress(jobId, 10 + Math.floor((i / normalizedRanges.length) * 60), `Extrayendo páginas ${humanPages.join(",")}\u2026`);
       const out = await PDFDocument.create();
       const copied = await out.copyPages(src, range);
       copied.forEach((p) => out.addPage(p));
       const bytes = await out.save({ useObjectStreams: true });
-      const label = formatRangeLabel(humanPages) || `range${i + 1}`;
+      const label = formatRangeLabel(humanPages) || `rango${i + 1}`;
       entries.push({ name: `${base}_${label}.pdf`, data: bytes });
     }
 
-    postProgress(jobId, 85, "Creando ZIP…");
+    postProgress(jobId, 85, "Creando ZIP\u2026");
     const zipBytes = buildZip(entries);
-    postProgress(jobId, 100, "Done");
-    postResult(jobId, `${base}_pages.zip`, zipBytes.buffer, "application/zip");
+    postProgress(jobId, 100, "Listo");
+    postResult(jobId, `${base}_paginas.zip`, zipBytes.buffer as ArrayBuffer, "application/zip");
     return;
   }
 
-  postProgress(jobId, 40, "Extracting pages…");
+  postProgress(jobId, 40, "Extrayendo páginas\u2026");
   const out = await PDFDocument.create();
   const copied = await out.copyPages(src, indices);
   copied.forEach((p) => out.addPage(p));
 
-  postProgress(jobId, 80, "Saving…");
+  postProgress(jobId, 80, "Guardando\u2026");
   const bytes = await out.save({ useObjectStreams: true });
-  postProgress(jobId, 100, "Done");
-  postResult(jobId, "split_pages.pdf", bytes.buffer, "application/pdf");
+  postProgress(jobId, 100, "Listo");
+  postResult(jobId, "paginas_extraidas.pdf", bytes.buffer as ArrayBuffer, "application/pdf");
 }
 
 /**
- * “Decent” compression approach (client-side):
- * - Use qpdf (WASM) to rewrite the file with object streams and stream compression.
- * - This often reduces size a bit, and improves structure; not as strong as Ghostscript.
+ * Compression with differentiated levels:
+ * - "small": Only rewrite with object streams (fast, minimal compression)
+ * - "balanced": Rewrite + recompress flate streams (standard)
+ * - "best": Rewrite + recompress + linearize for web (maximum optimization)
  */
-async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, level: "small"|"balanced"|"best") {
-  postProgress(jobId, 5, "Initializing qpdf (WASM)…");
+async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, level: "small" | "balanced" | "best") {
+  postProgress(jobId, 5, "Inicializando qpdf (WASM)\u2026");
 
   const qpdf = await getQpdf();
+  postProgress(jobId, 15, "Desencriptando PDF\u2026");
   const unlocked = await decryptPdf(file.bytes, file.password, file.name);
 
   const inName = `in_${++qpdfRunId}.pdf`;
   const outName = `out_${qpdfRunId}.pdf`;
 
-  // Map level to qpdf flags. These are conservative, broadly compatible.
-  // - object streams + stream compression
   const argsBase = [
     "--object-streams=generate",
     "--stream-data=compress",
   ];
 
-  // Some qpdf builds also support '--compression-level', but not all.
   const levelArgs =
-    level === "small" ? ["--recompress-flate"] :
-    level === "best" ? ["--recompress-flate"] :
-    ["--recompress-flate"];
+    level === "small"
+      ? [] // Only object streams + stream compression, no recompression
+      : level === "balanced"
+        ? ["--recompress-flate"] // Standard recompression
+        : ["--recompress-flate", "--linearize"]; // Aggressive: recompress + linearize
+
+  const levelLabel =
+    level === "small" ? "ligera" :
+    level === "balanced" ? "equilibrada" : "máxima";
 
   const args = [...argsBase, ...levelArgs, `/in/${inName}`, `/out/${outName}`];
 
-  postProgress(jobId, 30, "Rewriting PDF…");
+  postProgress(jobId, 30, `Reescribiendo PDF (compresión ${levelLabel})\u2026`);
   qpdf.FS.writeFile(`/in/${inName}`, new Uint8Array(unlocked));
   qpdf.callMain(args);
 
@@ -359,11 +349,11 @@ async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer;
   try {
     outBytes = qpdf.FS.readFile(`/out/${outName}`);
   } catch (err) {
-    console.error("qpdf read error", err);
+    console.error("Error de lectura qpdf", err);
   }
 
   if (!outBytes) {
-    throw new Error("qpdf-wasm returned no output (out.pdf missing).");
+    throw new Error("qpdf-wasm no produjo salida.");
   }
 
   try {
@@ -373,49 +363,44 @@ async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer;
     /* ignore cleanup errors */
   }
 
-  postProgress(jobId, 100, "Done");
-  postResult(jobId, `compressed_${file.name.replace(/\.pdf$/i, "")}.pdf`, outBytes.buffer, "application/pdf");
+  postProgress(jobId, 100, "Listo");
+  postResult(jobId, `comprimido_${file.name.replace(/\.pdf$/i, "")}.pdf`, outBytes.buffer as ArrayBuffer, "application/pdf");
 }
 
-/**
- * PDF -> Images:
- * Uses official MuPDF.js (WASM).
- * Now outputs a ZIP with all pages as PNG/JPG.
- */
-async function pdf2img(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, format: "png"|"jpg", dpi: number) {
-  postProgress(jobId, 5, "Initializing MuPDF (WASM)…");
-  // Ensure WASM is fetched from the correct URL (respects Vite base).
+async function pdf2img(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, format: "png" | "jpg", dpi: number) {
+  postProgress(jobId, 5, "Inicializando MuPDF (WASM)\u2026");
   (globalThis as any)["$libmupdf_wasm_Module"] = {
     locateFile: (path: string) => path.endsWith(".wasm") ? mupdfWasmUrl : path,
   };
-  const mupdf: any = await import("mupdf"); // ESM-only per docs
+  const mupdf: any = await import("mupdf");
 
+  postProgress(jobId, 10, "Desencriptando PDF\u2026");
   const unlocked = await decryptPdf(file.bytes, file.password, file.name);
   const doc = mupdf.Document.openDocument(unlocked, "pdf");
   const total = doc.countPages();
-  if (!total) throw new Error("PDF has no pages.");
+  if (!total) throw new Error("El PDF no tiene páginas.");
 
   const entries: Array<{ name: string; data: Uint8Array }> = [];
   const scale = dpi / 72;
 
   for (let i = 0; i < total; i++) {
-    postProgress(jobId, 10 + Math.floor((i / total) * 70), `Rendering page ${i + 1}…`);
+    postProgress(jobId, 15 + Math.floor((i / total) * 65), `Renderizando página ${i + 1} de ${total}\u2026`);
     const page = doc.loadPage(i);
     const pix = page.toPixmap([scale, 0, 0, scale, 0, 0], mupdf.ColorSpace.DeviceRGB, format === "png");
     const data: Uint8Array = format === "jpg" ? pix.asJPEG(85) : pix.asPNG();
-    entries.push({ name: `page_${String(i + 1).padStart(3, "0")}.${format}`, data });
+    entries.push({ name: `pagina_${String(i + 1).padStart(3, "0")}.${format}`, data });
 
     pix.destroy?.();
     page.destroy?.();
   }
 
-  postProgress(jobId, 85, "Packaging ZIP…");
+  postProgress(jobId, 85, "Empaquetando ZIP\u2026");
   const zipBytes = buildZip(entries);
-  const base = file.name.replace(/\.pdf$/i, "") || "document";
-  const outName = `${base}_images_${format}.zip`;
+  const base = file.name.replace(/\.pdf$/i, "") || "documento";
+  const outName = `${base}_imagenes_${format}.zip`;
 
-  postProgress(jobId, 100, "Done");
-  postResult(jobId, outName, zipBytes.buffer, "application/zip");
+  postProgress(jobId, 100, "Listo");
+  postResult(jobId, outName, zipBytes.buffer as ArrayBuffer, "application/zip");
 }
 
 self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
@@ -430,7 +415,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     } else if (msg.type === "pdf2img") {
       await pdf2img(msg.jobId, msg.file, msg.format, msg.dpi);
     } else {
-      throw new Error("Unknown worker request");
+      throw new Error("Solicitud de worker desconocida");
     }
   } catch (e: any) {
     postError((msg as any).jobId ?? "unknown", e?.message ?? String(e));

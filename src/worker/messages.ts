@@ -23,5 +23,5 @@ export function postError(jobId: string, message: string) {
 
 export function postResult(jobId: string, outputName: string, outputBytes: ArrayBuffer, mime: string) {
   const msg: WorkerEvent = { type: "result", jobId, outputName, outputBytes, mime };
-  postMessage(msg, [outputBytes]);
+  (self as unknown as Worker).postMessage(msg, [outputBytes]);
 }
