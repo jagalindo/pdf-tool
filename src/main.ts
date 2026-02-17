@@ -70,6 +70,10 @@ function clampDpi(value: number): number {
   return Math.round(value);
 }
 
+const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+const WARN_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+const MAX_MERGE_FILES = 50;
+
 // --- Worker ---
 const worker = new Worker(new URL("./worker/engine.worker.ts", import.meta.url), { type: "module" });
 
@@ -80,6 +84,7 @@ let jobs: Job[] = [];
 let draggingIdx: number | null = null;
 let searchQuery = "";
 
+let isJobRunning = false;
 let compressLevel: "small" | "balanced" | "best" = "balanced";
 let splitPages = "1";
 let splitOutput: "single" | "zip" = "single";
@@ -94,9 +99,11 @@ worker.onmessage = (ev: MessageEvent<WorkerEvent>) => {
   } else if (msg.type === "result") {
     const blob = new Blob([msg.outputBytes], { type: msg.mime });
     jobs = jobs.map(j => j.id === msg.jobId ? { ...j, status: "done", progress: 100, progressNote: undefined, outputName: msg.outputName, outputBlob: blob } : j);
+    isJobRunning = false;
     render();
   } else if (msg.type === "error") {
     jobs = jobs.map(j => j.id === msg.jobId ? { ...j, status: "error", progressNote: undefined, error: msg.message } : j);
+    isJobRunning = false;
     render();
   }
 };
@@ -132,12 +139,82 @@ function parsePageGroups(input: string): { flat: number[]; groups: number[][] } 
   return { flat, groups };
 }
 
-function validatePageInput(input: string): string | null {
+type ValidationResult = { type: "error"; msg: string } | { type: "warn"; msg: string } | { type: "ok"; msg: string } | null;
+
+function validatePageInput(input: string): ValidationResult {
   const trimmed = input.trim();
-  if (!trimmed) return "Ingresa al menos una página.";
-  const { flat } = parsePageGroups(trimmed);
-  if (flat.length === 0) return "No se encontraron páginas válidas. Usa formato: 1,3,5-7";
+  if (!trimmed) return { type: "error", msg: "Ingresa al menos una página." };
+  // Check for invalid characters
+  if (/[^0-9,;\s\n\-]/.test(trimmed)) {
+    const invalid = trimmed.match(/[^0-9,;\s\n\-]/g)!;
+    return { type: "error", msg: `Caracteres no válidos: "${invalid.join("")}". Usa solo números, comas, guiones y punto y coma.` };
+  }
+  const { flat, groups } = parsePageGroups(trimmed);
+  if (flat.length === 0) return { type: "error", msg: "No se encontraron páginas válidas. Usa formato: 1,3,5-7" };
+  if (flat.length > 500) return { type: "warn", msg: `Se seleccionaron ${flat.length} páginas. El proceso puede tardar.` };
+  const maxPage = Math.max(...flat);
+  if (maxPage > 10000) return { type: "warn", msg: `Página máxima: ${maxPage}. Asegúrate de que el PDF tenga tantas páginas.` };
+  const groupCount = groups.length;
+  return { type: "ok", msg: `${flat.length} página(s) seleccionada(s)${groupCount > 1 ? ` en ${groupCount} grupo(s)` : ""}.` };
+}
+
+function validateDpiInput(value: number): ValidationResult {
+  if (!Number.isFinite(value) || value <= 0) return { type: "error", msg: "Ingresa un número válido entre 36 y 600." };
+  if (value < 36) return { type: "error", msg: `DPI mínimo: 36. Valor actual: ${value}.` };
+  if (value > 600) return { type: "error", msg: `DPI máximo: 600. Valor actual: ${value}.` };
+  if (value > 300) return { type: "warn", msg: `DPI alto (${value}). Las imágenes serán grandes y el proceso más lento.` };
+  return { type: "ok", msg: `${value} DPI.` };
+}
+
+function validateFiles(): ValidationResult {
+  if (files.length === 0) return { type: "error", msg: "Agrega al menos un archivo PDF." };
+  if (activeTool === "merge" && files.length < 2) return { type: "error", msg: "Combinar necesita al menos 2 PDFs." };
+  if (activeTool === "merge" && files.length > MAX_MERGE_FILES) return { type: "error", msg: `Máximo ${MAX_MERGE_FILES} archivos para combinar.` };
+  if (activeTool !== "merge" && files.length > 1) return { type: "warn", msg: "Solo se procesará el primer archivo." };
+
+  const emptyFiles = files.filter(f => f.file.size === 0);
+  if (emptyFiles.length > 0) return { type: "error", msg: `Archivo vacío: "${emptyFiles[0].file.name}" (0 bytes).` };
+
+  const tooLarge = files.filter(f => f.file.size > MAX_FILE_SIZE);
+  if (tooLarge.length > 0) return { type: "error", msg: `"${tooLarge[0].file.name}" excede el límite de ${prettyBytes(MAX_FILE_SIZE)}.` };
+
+  const largeFiles = files.filter(f => f.file.size > WARN_FILE_SIZE && f.file.size <= MAX_FILE_SIZE);
+  if (largeFiles.length > 0) return { type: "warn", msg: `"${largeFiles[0].file.name}" es grande (${prettyBytes(largeFiles[0].file.size)}). El proceso puede tardar.` };
+
+  const total = totalInputSize();
+  if (total > WARN_FILE_SIZE && !largeFiles.length) return { type: "warn", msg: `Tamaño total: ${prettyBytes(total)}. El proceso puede tardar.` };
+
   return null;
+}
+
+function canRun(): boolean {
+  // Files basic check
+  if (files.length === 0) return false;
+  if (activeTool === "merge" && files.length < 2) return false;
+  if (activeTool === "merge" && files.length > MAX_MERGE_FILES) return false;
+  if (files.some(f => f.file.size === 0)) return false;
+  if (files.some(f => f.file.size > MAX_FILE_SIZE)) return false;
+
+  // Job already running
+  if (isJobRunning) return false;
+
+  // Tool-specific
+  if (activeTool === "split") {
+    const v = validatePageInput(splitPages);
+    if (v?.type === "error") return false;
+  }
+  if (activeTool === "pdf2img") {
+    const raw = imgDpi;
+    if (!Number.isFinite(raw) || raw < 36 || raw > 600) return false;
+  }
+  return true;
+}
+
+function renderValidationHint(v: ValidationResult): string {
+  if (!v) return "";
+  const cls = v.type === "error" ? "validationHint" : v.type === "warn" ? "validationHint warn" : "validationHint ok";
+  const icon = v.type === "error" ? "\u2718" : v.type === "warn" ? "\u26A0" : "\u2714";
+  return `<div class="${cls}">${icon} ${escapeAttr(v.msg)}</div>`;
 }
 
 // --- File handling ---
@@ -155,18 +232,29 @@ function totalInputSize(): number {
 
 // --- Job execution ---
 async function runJob() {
-  if (files.length === 0) return alert("Agrega PDFs primero.");
-  if (activeTool === "merge" && files.length < 2) return alert("Combinar necesita al menos 2 PDFs.");
+  if (isJobRunning) return;
 
+  // File validations
+  const fileVal = validateFiles();
+  if (fileVal?.type === "error") return alert(fileVal.msg);
+
+  // Tool-specific validations
   if (activeTool === "split") {
-    const err = validatePageInput(splitPages);
-    if (err) return alert(err);
+    const pageVal = validatePageInput(splitPages);
+    if (pageVal?.type === "error") return alert(pageVal.msg);
   }
 
   if (activeTool === "pdf2img") {
+    const dpiVal = validateDpiInput(imgDpi);
+    if (dpiVal?.type === "error") {
+      imgDpi = clampDpi(imgDpi);
+      render();
+      return alert(dpiVal.msg);
+    }
     imgDpi = clampDpi(imgDpi);
   }
 
+  isJobRunning = true;
   const jobId = uid();
   const tool = TOOLS.find(t => t.id === activeTool)!;
 
@@ -223,6 +311,7 @@ async function runJob() {
       return;
     }
   } catch (e: any) {
+    isJobRunning = false;
     jobs = jobs.map(j => j.id === jobId ? { ...j, status: "error", error: e?.message ?? String(e) } : j);
     render();
   }
@@ -236,15 +325,38 @@ function setActiveTool(next: ToolId) {
 
 function onFilesChosen(list: FileList | null) {
   if (!list) return;
-  const next = Array.from(list).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
-  if (next.length !== list.length) alert("Solo se aceptan archivos PDF.");
+  const all = Array.from(list);
+  const pdfs = all.filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
+  const rejected = all.length - pdfs.length;
+  if (rejected > 0) alert(`${rejected} archivo(s) ignorado(s): solo se aceptan PDFs.`);
+
+  const emptyFiles = pdfs.filter(f => f.size === 0);
+  if (emptyFiles.length > 0) {
+    alert(`"${emptyFiles[0].name}" está vacío (0 bytes) y fue ignorado.`);
+  }
+  const validPdfs = pdfs.filter(f => f.size > 0);
+
+  const tooLarge = validPdfs.filter(f => f.size > MAX_FILE_SIZE);
+  if (tooLarge.length > 0) {
+    alert(`"${tooLarge[0].name}" excede el límite de ${prettyBytes(MAX_FILE_SIZE)} y fue ignorado.`);
+  }
+  const accepted = validPdfs.filter(f => f.size <= MAX_FILE_SIZE);
+
+  if (accepted.length === 0) return;
+
   const map = new Map(files.map(f => [f.key, f]));
-  for (const f of next) {
+  for (const f of accepted) {
     const key = makeKey(f);
     const prev = map.get(key);
     map.set(key, prev ? { ...prev, file: f } : { file: f, key, password: "" });
   }
-  files = Array.from(map.values());
+
+  if (activeTool === "merge" && map.size > MAX_MERGE_FILES) {
+    alert(`Máximo ${MAX_MERGE_FILES} archivos para combinar. Se aceptaron los primeros ${MAX_MERGE_FILES}.`);
+    files = Array.from(map.values()).slice(0, MAX_MERGE_FILES);
+  } else {
+    files = Array.from(map.values());
+  }
   render();
 }
 
@@ -301,6 +413,10 @@ function render() {
   const filteredTools = getFilteredTools();
   const themeIcon = currentTheme === "light" ? "\u{1F319}" : "\u{2600}\u{FE0F}";
   const needsMultipleFiles = activeTool === "merge";
+  const runEnabled = canRun();
+  const fileValidation = files.length > 0 ? validateFiles() : null;
+  const pageValidation = activeTool === "split" ? validatePageInput(splitPages) : null;
+  const dpiValidation = activeTool === "pdf2img" ? validateDpiInput(imgDpi) : null;
 
   app.innerHTML = `
     <div class="topbar">
@@ -340,7 +456,7 @@ function render() {
               <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
                 <button class="btn" id="pick">Subir</button>
                 <button class="btn" id="clear" ${files.length ? "" : "disabled"}>Limpiar</button>
-                <button class="btn primary" id="run">Ejecutar</button>
+                <button class="btn primary" id="run" ${runEnabled ? "" : "disabled"}>${isJobRunning ? "Procesando\u2026" : "Ejecutar"}</button>
               </div>
             </div>
 
@@ -370,6 +486,7 @@ function render() {
                   <button class="btn" data-rm="${idx}">Quitar</button>
                 </div>
               `).join("")}
+              ${renderValidationHint(fileValidation)}
             </div>
 
             <div class="split"></div>
@@ -393,8 +510,9 @@ function render() {
                   ${activeTool === "split" ? `
                     <div>
                       <div class="kv">P\u00E1ginas</div>
-                      <input id="pages" class="input" value="${escapeAttr(splitPages)}" placeholder="ej: 1,2,5-7; 10-12" style="margin-top:6px;" />
-                      <div class="small" style="margin-top:6px;">Formato: 1,3,5-7 (p\u00E1ginas 1-based). Separa rangos con ; para m\u00FAltiples PDFs en ZIP.</div>
+                      <input id="pages" class="input ${pageValidation?.type === "error" ? "invalid" : pageValidation?.type === "ok" ? "valid" : ""}" value="${escapeAttr(splitPages)}" placeholder="ej: 1,2,5-7; 10-12" style="margin-top:6px;" />
+                      ${renderValidationHint(pageValidation)}
+                      <div class="small" style="margin-top:4px;">Formato: 1,3,5-7 (p\u00E1ginas 1-based). Separa rangos con ; para m\u00FAltiples PDFs en ZIP.</div>
                       <div class="kv" style="margin-top:12px;">Salida</div>
                       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
                         ${(["single", "zip"] as const).map(mode => `<button class="btn ${splitOutput === mode ? "primary" : ""}" data-splitout="${mode}">${mode === "single" ? "PDF \u00FAnico" : "ZIP (un PDF por rango)"}</button>`).join("")}
@@ -409,8 +527,9 @@ function render() {
                         ${(["png", "jpg"] as const).map(f => `<button class="btn ${imgFormat === f ? "primary" : ""}" data-imgfmt="${f}">${f.toUpperCase()}</button>`).join("")}
                       </div>
                       <div class="kv" style="margin-top:10px;">DPI (36\u2013600)</div>
-                      <input id="dpi" type="number" min="36" max="600" class="input" value="${imgDpi}" style="margin-top:6px;" />
-                      <div class="small" style="margin-top:6px;">Genera un ZIP con todas las p\u00E1ginas como ${imgFormat.toUpperCase()}. Mayor DPI = mayor calidad y tama\u00F1o.</div>
+                      <input id="dpi" type="number" min="36" max="600" class="input ${dpiValidation?.type === "error" ? "invalid" : dpiValidation?.type === "ok" ? "valid" : ""}" value="${imgDpi}" style="margin-top:6px;" />
+                      ${renderValidationHint(dpiValidation)}
+                      <div class="small" style="margin-top:4px;">Genera un ZIP con todas las p\u00E1ginas como ${imgFormat.toUpperCase()}. Mayor DPI = mayor calidad y tama\u00F1o.</div>
                     </div>
                   ` : ""}
                 </div>
@@ -538,10 +657,17 @@ function render() {
     b.onclick = () => { splitOutput = b.dataset.splitout as any; render(); };
   });
   const pages = document.getElementById("pages") as HTMLInputElement | null;
-  if (pages) pages.oninput = () => { splitPages = pages.value; };
+  if (pages) pages.oninput = () => {
+    splitPages = pages.value;
+    render();
+  };
 
   const dpi = document.getElementById("dpi") as HTMLInputElement | null;
-  if (dpi) dpi.oninput = () => { imgDpi = clampDpi(Number(dpi.value) || 150); };
+  if (dpi) dpi.oninput = () => {
+    const raw = Number(dpi.value);
+    imgDpi = Number.isFinite(raw) ? raw : 150;
+    render();
+  };
 
   document.querySelectorAll<HTMLInputElement>("[data-pass]").forEach(inp => {
     inp.oninput = () => {
