@@ -85,7 +85,7 @@ let draggingIdx: number | null = null;
 let searchQuery = "";
 
 let isJobRunning = false;
-let compressLevel: "small" | "balanced" | "best" = "balanced";
+let compressLevel: "small" | "balanced" | "best" | "aggressive" = "balanced";
 let splitPages = "1";
 let splitOutput: "single" | "zip" = "single";
 let imgFormat: "png" | "jpg" = "png";
@@ -406,7 +406,18 @@ function compressionLabel(level: string): string {
     case "small": return "Ligera";
     case "balanced": return "Equilibrada";
     case "best": return "Máxima";
+    case "aggressive": return "Agresiva";
     default: return level;
+  }
+}
+
+function compressionDescription(level: string): string {
+  switch (level) {
+    case "small": return "Reescritura rápida sin recompresión.";
+    case "balanced": return "Recompresión estándar con flate.";
+    case "best": return "Recompresión agresiva + linearización.";
+    case "aggressive": return "Rasteriza páginas a 150 DPI JPEG. Mayor reducción posible — el texto no será seleccionable.";
+    default: return "";
   }
 }
 
@@ -522,9 +533,9 @@ function render() {
                     <div>
                       <div class="kv">Nivel de compresi\u00F3n</div>
                       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
-                        ${(["small", "balanced", "best"] as const).map(l => `<button class="btn ${compressLevel === l ? "primary" : ""}" data-cmpr="${l}">${compressionLabel(l)}</button>`).join("")}
+                        ${(["small", "balanced", "best", "aggressive"] as const).map(l => `<button class="btn ${compressLevel === l ? "primary" : ""}" data-cmpr="${l}">${compressionLabel(l)}</button>`).join("")}
                       </div>
-                      <div class="small" style="margin-top:6px;">${compressLevel === "small" ? "Reescritura r\u00E1pida sin recompresi\u00F3n." : compressLevel === "balanced" ? "Recompresi\u00F3n est\u00E1ndar con flate." : "Recompresi\u00F3n agresiva + linearizaci\u00F3n."}</div>
+                      <div class="small" style="margin-top:6px;">${compressionDescription(compressLevel)}</div>
                     </div>
                   ` : ""}
 
