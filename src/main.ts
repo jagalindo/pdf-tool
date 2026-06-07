@@ -11,6 +11,13 @@ const TOOLS: ToolDef[] = [
   { id: "pdf2img", title: "PDF a Imagen", subtitle: "Renderiza páginas a PNG/JPG en ZIP (MuPDF WASM)", tags: ["WASM", "Offline", "ZIP"], accepts: "pdf", output: "zip" },
 ];
 
+const TOOL_ICONS: Record<string, string> = {
+  merge: "🔗",
+  split: "✂️",
+  compress: "🗜️",
+  pdf2img: "🖼️",
+};
+
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 // --- Theme ---
@@ -411,6 +418,12 @@ function compressionLabel(level: string): string {
   }
 }
 
+function jobStatusBadge(status: string): string {
+  if (status === "running") return `<span class="spinner"></span>`;
+  const cls = status === "done" ? "primary" : status === "error" ? "error" : "";
+  return `<span class="badge ${cls}">${statusLabel(status)}</span>`;
+}
+
 function compressionDescription(level: string): string {
   switch (level) {
     case "small": return "Reescritura rápida sin recompresión.";
@@ -425,10 +438,13 @@ function compressionDescription(level: string): string {
 function renderToolsList(filtered: ToolDef[]): string {
   if (filtered.length === 0) return `<div class="small" style="padding:10px;">No se encontraron herramientas.</div>`;
   return filtered.map(t => `
-    <button class="toolBtn" data-tool="${t.id}">
-      <div style="font-weight:750; font-size: 13px;">${t.title} ${t.id === activeTool ? `<span class="badge primary" style="margin-left:6px;">Activa</span>` : ""}</div>
-      <div class="p">${t.subtitle}</div>
-      <div class="badges">${t.tags.map(x => `<span class="badge">${x}</span>`).join("")}</div>
+    <button class="toolBtn${t.id === activeTool ? " active" : ""}" data-tool="${t.id}">
+      <div class="toolBtnHeader">
+        <span class="toolBtnIcon">${TOOL_ICONS[t.id] ?? "📄"}</span>
+        <span class="toolBtnName">${t.title}</span>
+      </div>
+      <div class="p" style="padding-left:36px;">${t.subtitle}</div>
+      <div class="badges" style="padding-left:36px;">${t.tags.map(x => `<span class="badge">${x}</span>`).join("")}</div>
     </button>
   `).join("");
 }
@@ -457,7 +473,7 @@ function render() {
           <div class="logo">\u{1F4C4}</div>
           <div>
             <div class="h1">PDF Toolkit</div>
-            <div class="p">100% en tu navegador \u2022 Vite + WASM + Workers</div>
+            <div class="p">100% local \u2022 Sin subida de archivos</div>
           </div>
         </div>
         <div style="display:flex; gap:10px; align-items:center; width:420px; max-width:50vw;">
@@ -495,10 +511,9 @@ function render() {
             <div class="split"></div>
 
             <div class="drop" id="drop">
-              <div>
-                <div style="font-weight:700">Arrastra PDFs aqu\u00ED</div>
-                <div class="small">o haz clic en Subir</div>
-              </div>
+              <div class="dropIcon">\u2B06</div>
+              <div class="dropTitle">Arrastra PDFs aqu\u00ED</div>
+              <div class="small">o haz clic en <strong>Subir</strong></div>
             </div>
 
             <div class="files" id="files">
@@ -588,19 +603,17 @@ function render() {
                   ? ` (\u2193${Math.round((1 - outputSize / j.inputSize) * 100)}%)`
                   : "";
                 return `
-                <div class="jobRow">
+                <div class="jobRow ${j.status}">
                   <div class="row">
                     <div style="min-width:0">
                       <div style="font-weight:700; font-size: 13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${j.toolTitle}</div>
                       <div class="kv">${new Date(j.createdAt).toLocaleString()} \u2022 ${j.inputCount} archivo(s)</div>
                       ${sizeInfo ? `<div class="jobSize">${sizeInfo}${outputInfo}${reduction ? `<span class="reduction">${reduction}</span>` : ""}</div>` : ""}
                     </div>
-                    <div>
-                      <span class="badge ${j.status === "done" ? "primary" : ""}">${statusLabel(j.status)}</span>
-                    </div>
+                    <div>${jobStatusBadge(j.status)}</div>
                   </div>
                   <div style="margin-top:10px;">
-                    <div class="progressBar"><div class="progressFill" style="width:${j.progress}%"></div></div>
+                    <div class="progressBar"><div class="progressFill ${j.status === 'running' ? 'running' : ''}" style="width:${j.progress}%"></div></div>
                     <div class="kv" style="margin-top:6px;">${j.progress}%${j.progressNote ? ` \u2013 ${escapeAttr(j.progressNote)}` : ""}</div>
                   </div>
                   ${j.error ? `<div class="err">${escapeAttr(j.error)}</div>` : ""}
@@ -694,8 +707,9 @@ function render() {
     };
   });
 
-  // drag and drop zone
+  // drag and drop zone (also clickable)
   const drop = document.getElementById("drop")!;
+  drop.addEventListener("click", () => input.click());
   drop.addEventListener("dragover", (e) => {
     e.preventDefault();
     drop.classList.add("dragover");
