@@ -2,25 +2,9 @@
 import { PDFDocument } from "pdf-lib";
 import { postError, postProgress, postResult, type WorkerRequest } from "./messages";
 
-// Vite will rewrite this to a hashed asset that respects BASE_URL.
-const resolveWasmUrl = (raw: string) => {
-  const fileName = raw.split("/").pop() ?? "module.wasm";
-  const envBase = (import.meta as any).env?.BASE_URL ?? "/";
-  const candidates = [raw];
-  if (raw.startsWith("/") && envBase !== "/" && !raw.startsWith(envBase)) {
-    candidates.push(`${envBase.replace(/\/$/, "")}${raw}`);
-  }
-  if (typeof self !== "undefined" && self.location) {
-    const locBase = self.location.pathname.replace(/\/[^/]*$/, "/");
-    candidates.push(`${locBase.replace(/\/$/, "")}/assets/${fileName}`);
-  }
-  return candidates[0];
-};
-
-const rawMupdfWasmUrl = new URL("../../node_modules/mupdf/dist/mupdf-wasm.wasm", import.meta.url).href;
-const rawQpdfWasmUrl = new URL("../../node_modules/@neslinesli93/qpdf-wasm/dist/qpdf.wasm", import.meta.url).href;
-const mupdfWasmUrl = resolveWasmUrl(rawMupdfWasmUrl);
-const qpdfWasmUrl = resolveWasmUrl(rawQpdfWasmUrl);
+// Vite rewrites new URL(..., import.meta.url) to a hashed, BASE_URL-aware asset path at build time.
+const mupdfWasmUrl = new URL("../../node_modules/mupdf/dist/mupdf-wasm.wasm", import.meta.url).href;
+const qpdfWasmUrl = new URL("../../node_modules/@neslinesli93/qpdf-wasm/dist/qpdf.wasm", import.meta.url).href;
 
 let qpdfReady: Promise<any> | null = null;
 let qpdfRunId = 0;
@@ -114,6 +98,21 @@ async function decryptPdf(bytes: ArrayBuffer, password?: string, label?: string)
     } catch {
       /* ignore cleanup errors */
     }
+  }
+}
+
+async function loadPdf(bytes: ArrayBuffer, password: string | undefined, label: string): Promise<PDFDocument> {
+  if (password?.trim()) {
+    const unlocked = await decryptPdf(bytes, password, label);
+    return PDFDocument.load(unlocked, { ignoreEncryption: true });
+  }
+  try {
+    return await PDFDocument.load(new Uint8Array(bytes));
+  } catch (err: any) {
+    if (/encrypt/i.test(String(err?.message ?? err))) {
+      throw new Error(`"${label}" está protegido con contraseña. Proporciona la contraseña e intenta de nuevo.`);
+    }
+    throw err;
   }
 }
 
@@ -249,8 +248,7 @@ async function merge(jobId: string, files: Array<{ name: string; bytes: ArrayBuf
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
     postProgress(jobId, 10 + Math.floor((i / files.length) * 60), `Importando ${f.name}\u2026`);
-    const unlocked = await decryptPdf(f.bytes, f.password, f.name);
-    const doc = await PDFDocument.load(unlocked, { ignoreEncryption: true });
+    const doc = await loadPdf(f.bytes, f.password, f.name);
     const pages = await out.copyPages(doc, doc.getPageIndices());
     pages.forEach((p) => out.addPage(p));
   }
@@ -263,8 +261,7 @@ async function merge(jobId: string, files: Array<{ name: string; bytes: ArrayBuf
 
 async function split(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, pages: number[], ranges: number[][], output: "single" | "zip") {
   postProgress(jobId, 5, "Cargando PDF\u2026");
-  const unlocked = await decryptPdf(file.bytes, file.password, file.name);
-  const src = await PDFDocument.load(unlocked, { ignoreEncryption: true });
+  const src = await loadPdf(file.bytes, file.password, file.name);
   const pageCount = src.getPageCount();
   const normalize = (list: number[]) =>
     Array.from(new Set(list.map((p) => p - 1).filter((p) => p >= 0 && p < pageCount))).sort((a, b) => a - b);
@@ -307,42 +304,79 @@ async function split(jobId: string, file: { name: string; bytes: ArrayBuffer; pa
   postResult(jobId, "paginas_extraidas.pdf", bytes.buffer as ArrayBuffer, "application/pdf");
 }
 
-/**
- * Compression with differentiated levels:
- * - "small": Only rewrite with object streams (fast, minimal compression)
- * - "balanced": Rewrite + recompress flate streams (standard)
- * - "best": Rewrite + recompress + linearize for web (maximum optimization)
- */
-async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, level: "small" | "balanced" | "best") {
+async function compress(jobId: string, file: { name: string; bytes: ArrayBuffer; password?: string }, level: "small" | "balanced" | "best" | "aggressive") {
   postProgress(jobId, 5, "Inicializando qpdf (WASM)\u2026");
-
   const qpdf = await getQpdf();
-  postProgress(jobId, 15, "Desencriptando PDF\u2026");
-  const unlocked = await decryptPdf(file.bytes, file.password, file.name);
 
+  // --- Aggressive mode: rasterize pages via MuPDF before structural compression ---
+  let inputBytes: Uint8Array;
+  if (level === "aggressive") {
+    postProgress(jobId, 10, "Inicializando MuPDF (WASM)\u2026");
+    (globalThis as any)["$libmupdf_wasm_Module"] = {
+      locateFile: (path: string) => path.endsWith(".wasm") ? mupdfWasmUrl : path,
+    };
+    const mupdf: any = await import("mupdf");
+
+    const needsDecrypt = !!file.password?.trim();
+    postProgress(jobId, 15, needsDecrypt ? "Desencriptando PDF\u2026" : "Cargando PDF\u2026");
+    const docBytes = needsDecrypt
+      ? await decryptPdf(file.bytes, file.password, file.name)
+      : new Uint8Array(file.bytes);
+
+    const src = mupdf.Document.openDocument(docBytes, "pdf");
+    const total = src.countPages();
+    if (!total) throw new Error("El PDF no tiene páginas.");
+
+    const rasterDoc = await PDFDocument.create();
+    const scale = 150 / 72;
+
+    for (let i = 0; i < total; i++) {
+      postProgress(jobId, 20 + Math.floor((i / total) * 50), `Rasterizando página ${i + 1} de ${total}\u2026`);
+      const page = src.loadPage(i);
+      const bounds = page.getBounds();
+      const pageW = Math.abs(bounds[2] - bounds[0]);
+      const pageH = Math.abs(bounds[3] - bounds[1]);
+
+      const pix = page.toPixmap([scale, 0, 0, scale, 0, 0], mupdf.ColorSpace.DeviceRGB, false);
+      const jpegData = pix.asJPEG(75);
+      pix.destroy?.();
+      page.destroy?.();
+
+      const img = await rasterDoc.embedJpg(jpegData);
+      const newPage = rasterDoc.addPage([pageW, pageH]);
+      newPage.drawImage(img, { x: 0, y: 0, width: pageW, height: pageH });
+    }
+    src.destroy?.();
+
+    postProgress(jobId, 72, "Guardando PDF rasterizado\u2026");
+    const rasterBytes = await rasterDoc.save({ useObjectStreams: true });
+    inputBytes = rasterBytes;
+  } else {
+    inputBytes = file.password?.trim()
+      ? await decryptPdf(file.bytes, file.password, file.name)
+      : new Uint8Array(file.bytes);
+  }
+
+  // --- Structural compression via qpdf ---
   const inName = `in_${++qpdfRunId}.pdf`;
   const outName = `out_${qpdfRunId}.pdf`;
 
-  const argsBase = [
-    "--object-streams=generate",
-    "--stream-data=compress",
-  ];
-
+  const pwdArgs = (level !== "aggressive" && file.password?.trim()) ? [`--password=${file.password.trim()}`] : [];
+  const argsBase = ["--object-streams=generate", "--stream-data=compress", "--remove-unreferenced-resources=yes"];
   const levelArgs =
-    level === "small"
-      ? [] // Only object streams + stream compression, no recompression
-      : level === "balanced"
-        ? ["--recompress-flate"] // Standard recompression
-        : ["--recompress-flate", "--linearize"]; // Aggressive: recompress + linearize
+    level === "small" ? [] :
+    level === "balanced" ? ["--recompress-flate"] :
+    ["--recompress-flate", "--linearize"];
 
   const levelLabel =
     level === "small" ? "ligera" :
-    level === "balanced" ? "equilibrada" : "máxima";
+    level === "balanced" ? "equilibrada" :
+    level === "best" ? "máxima" : "agresiva";
 
-  const args = [...argsBase, ...levelArgs, `/in/${inName}`, `/out/${outName}`];
+  const args = [...pwdArgs, ...argsBase, ...levelArgs, `/in/${inName}`, `/out/${outName}`];
 
-  postProgress(jobId, 30, `Reescribiendo PDF (compresión ${levelLabel})\u2026`);
-  qpdf.FS.writeFile(`/in/${inName}`, new Uint8Array(unlocked));
+  postProgress(jobId, level === "aggressive" ? 78 : 20, `Comprimiendo PDF (${levelLabel})\u2026`);
+  qpdf.FS.writeFile(`/in/${inName}`, inputBytes);
   qpdf.callMain(args);
 
   let outBytes: Uint8Array | undefined;
@@ -374,9 +408,12 @@ async function pdf2img(jobId: string, file: { name: string; bytes: ArrayBuffer; 
   };
   const mupdf: any = await import("mupdf");
 
-  postProgress(jobId, 10, "Desencriptando PDF\u2026");
-  const unlocked = await decryptPdf(file.bytes, file.password, file.name);
-  const doc = mupdf.Document.openDocument(unlocked, "pdf");
+  const needsDecrypt = !!file.password?.trim();
+  postProgress(jobId, 10, needsDecrypt ? "Desencriptando PDF\u2026" : "Cargando PDF\u2026");
+  const docBytes = needsDecrypt
+    ? await decryptPdf(file.bytes, file.password, file.name)
+    : new Uint8Array(file.bytes);
+  const doc = mupdf.Document.openDocument(docBytes, "pdf");
   const total = doc.countPages();
   if (!total) throw new Error("El PDF no tiene páginas.");
 
