@@ -1,12 +1,26 @@
-export type ToolId = "merge" | "split" | "compress" | "pdf2img";
+export type ToolId =
+  | "merge"
+  | "split"
+  | "compress"
+  | "pdf2img"
+  | "rotate"
+  | "img2pdf"
+  | "protect"
+  | "deletepages"
+  | "watermark"
+  | "pagenumbers"
+  | "metadata"
+  | "extracttext"
+  | "crop"
+  | "reorder";
 
 export type ToolDef = {
   id: ToolId;
   title: string;
   subtitle: string;
   tags: string[];
-  accepts: "pdf";
-  output: "pdf" | "zip";
+  accepts: "pdf" | "image";
+  output: "pdf" | "zip" | "txt";
 };
 
 export type JobStatus = "queued" | "running" | "done" | "error";
