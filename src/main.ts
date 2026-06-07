@@ -287,27 +287,30 @@ async function runJob() {
     if (activeTool === "split") {
       const { flat, groups } = parsePageGroups(splitPages);
       const f = files[0];
+      const bytes = await readFileBytes(f.file);
       const req: WorkerRequest = {
         type: "split",
         jobId,
-        file: { name: f.file.name, bytes: await readFileBytes(f.file), password: f.password?.trim() || undefined },
+        file: { name: f.file.name, bytes, password: f.password?.trim() || undefined },
         pages: flat,
         ranges: groups.length ? groups : [flat],
         output: splitOutput,
       };
-      worker.postMessage(req, [(req as any).file.bytes]);
+      worker.postMessage(req, [bytes]);
       return;
     }
     if (activeTool === "compress") {
       const f = files[0];
-      const req: WorkerRequest = { type: "compress", jobId, file: { name: f.file.name, bytes: await readFileBytes(f.file), password: f.password?.trim() || undefined }, level: compressLevel };
-      worker.postMessage(req, [(req as any).file.bytes]);
+      const bytes = await readFileBytes(f.file);
+      const req: WorkerRequest = { type: "compress", jobId, file: { name: f.file.name, bytes, password: f.password?.trim() || undefined }, level: compressLevel };
+      worker.postMessage(req, [bytes]);
       return;
     }
     if (activeTool === "pdf2img") {
       const f = files[0];
-      const req: WorkerRequest = { type: "pdf2img", jobId, file: { name: f.file.name, bytes: await readFileBytes(f.file), password: f.password?.trim() || undefined }, format: imgFormat, dpi: imgDpi };
-      worker.postMessage(req, [(req as any).file.bytes]);
+      const bytes = await readFileBytes(f.file);
+      const req: WorkerRequest = { type: "pdf2img", jobId, file: { name: f.file.name, bytes, password: f.password?.trim() || undefined }, format: imgFormat, dpi: imgDpi };
+      worker.postMessage(req, [bytes]);
       return;
     }
   } catch (e: any) {
@@ -405,6 +408,24 @@ function compressionLabel(level: string): string {
     case "best": return "Máxima";
     default: return level;
   }
+}
+
+// --- Tool list helpers ---
+function renderToolsList(filtered: ToolDef[]): string {
+  if (filtered.length === 0) return `<div class="small" style="padding:10px;">No se encontraron herramientas.</div>`;
+  return filtered.map(t => `
+    <button class="toolBtn" data-tool="${t.id}">
+      <div style="font-weight:750; font-size: 13px;">${t.title} ${t.id === activeTool ? `<span class="badge primary" style="margin-left:6px;">Activa</span>` : ""}</div>
+      <div class="p">${t.subtitle}</div>
+      <div class="badges">${t.tags.map(x => `<span class="badge">${x}</span>`).join("")}</div>
+    </button>
+  `).join("");
+}
+
+function bindToolButtons(container: HTMLElement): void {
+  container.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(btn => {
+    btn.onclick = () => setActiveTool(btn.dataset.tool as ToolId);
+  });
 }
 
 // --- Render ---
@@ -511,7 +532,7 @@ function render() {
                     <div>
                       <div class="kv">P\u00E1ginas</div>
                       <input id="pages" class="input ${pageValidation?.type === "error" ? "invalid" : pageValidation?.type === "ok" ? "valid" : ""}" value="${escapeAttr(splitPages)}" placeholder="ej: 1,2,5-7; 10-12" style="margin-top:6px;" />
-                      ${renderValidationHint(pageValidation)}
+                      <div id="pageHint">${renderValidationHint(pageValidation)}</div>
                       <div class="small" style="margin-top:4px;">Formato: 1,3,5-7 (p\u00E1ginas 1-based). Separa rangos con ; para m\u00FAltiples PDFs en ZIP.</div>
                       <div class="kv" style="margin-top:12px;">Salida</div>
                       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
@@ -528,7 +549,7 @@ function render() {
                       </div>
                       <div class="kv" style="margin-top:10px;">DPI (36\u2013600)</div>
                       <input id="dpi" type="number" min="36" max="600" class="input ${dpiValidation?.type === "error" ? "invalid" : dpiValidation?.type === "ok" ? "valid" : ""}" value="${imgDpi}" style="margin-top:6px;" />
-                      ${renderValidationHint(dpiValidation)}
+                      <div id="dpiHint">${renderValidationHint(dpiValidation)}</div>
                       <div class="small" style="margin-top:4px;">Genera un ZIP con todas las p\u00E1ginas como ${imgFormat.toUpperCase()}. Mayor DPI = mayor calidad y tama\u00F1o.</div>
                     </div>
                   ` : ""}
@@ -594,20 +615,8 @@ function render() {
 
   // tools list
   const toolsEl = document.getElementById("tools")!;
-  toolsEl.innerHTML = filteredTools.length === 0
-    ? `<div class="small" style="padding:10px;">No se encontraron herramientas.</div>`
-    : filteredTools.map(t => `
-    <button class="toolBtn" data-tool="${t.id}">
-      <div style="font-weight:750; font-size: 13px;">${t.title} ${t.id === activeTool ? `<span class="badge primary" style="margin-left:6px;">Activa</span>` : ""}</div>
-      <div class="p">${t.subtitle}</div>
-      <div class="badges">${t.tags.map(x => `<span class="badge">${x}</span>`).join("")}</div>
-    </button>
-  `).join("");
-
-  // --- Event handlers ---
-  toolsEl.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(btn => {
-    btn.onclick = () => setActiveTool(btn.dataset.tool as ToolId);
-  });
+  toolsEl.innerHTML = renderToolsList(filteredTools);
+  bindToolButtons(toolsEl);
 
   const input = document.createElement("input");
   input.type = "file";
@@ -625,21 +634,9 @@ function render() {
   const searchEl = document.getElementById("search") as HTMLInputElement;
   searchEl.oninput = () => {
     searchQuery = searchEl.value;
-    // Re-render tools list only
     const toolsContainer = document.getElementById("tools")!;
-    const filtered = getFilteredTools();
-    toolsContainer.innerHTML = filtered.length === 0
-      ? `<div class="small" style="padding:10px;">No se encontraron herramientas.</div>`
-      : filtered.map(t => `
-        <button class="toolBtn" data-tool="${t.id}">
-          <div style="font-weight:750; font-size: 13px;">${t.title} ${t.id === activeTool ? `<span class="badge primary" style="margin-left:6px;">Activa</span>` : ""}</div>
-          <div class="p">${t.subtitle}</div>
-          <div class="badges">${t.tags.map(x => `<span class="badge">${x}</span>`).join("")}</div>
-        </button>
-      `).join("");
-    toolsContainer.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(btn => {
-      btn.onclick = () => setActiveTool(btn.dataset.tool as ToolId);
-    });
+    toolsContainer.innerHTML = renderToolsList(getFilteredTools());
+    bindToolButtons(toolsContainer);
   };
 
   document.querySelectorAll<HTMLButtonElement>("[data-rm]").forEach(b => {
@@ -659,14 +656,24 @@ function render() {
   const pages = document.getElementById("pages") as HTMLInputElement | null;
   if (pages) pages.oninput = () => {
     splitPages = pages.value;
-    render();
+    const v = validatePageInput(splitPages);
+    const hintEl = document.getElementById("pageHint");
+    if (hintEl) hintEl.innerHTML = renderValidationHint(v);
+    pages.className = `input ${v?.type === "error" ? "invalid" : v?.type === "ok" ? "valid" : ""}`;
+    const runBtn = document.getElementById("run") as HTMLButtonElement | null;
+    if (runBtn) runBtn.disabled = !canRun();
   };
 
   const dpi = document.getElementById("dpi") as HTMLInputElement | null;
   if (dpi) dpi.oninput = () => {
     const raw = Number(dpi.value);
     imgDpi = Number.isFinite(raw) ? raw : 150;
-    render();
+    const v = validateDpiInput(imgDpi);
+    const hintEl = document.getElementById("dpiHint");
+    if (hintEl) hintEl.innerHTML = renderValidationHint(v);
+    dpi.className = `input ${v?.type === "error" ? "invalid" : v?.type === "ok" ? "valid" : ""}`;
+    const runBtn = document.getElementById("run") as HTMLButtonElement | null;
+    if (runBtn) runBtn.disabled = !canRun();
   };
 
   document.querySelectorAll<HTMLInputElement>("[data-pass]").forEach(inp => {
