@@ -258,6 +258,16 @@ const dict = {
   "opt.reorderNote":         { es: "Lista completa de páginas (1-based) en el nuevo orden, separadas por comas.", en: "Complete list of pages (1-based) in the new order, comma-separated.", de: "Vollständige Seitenliste (1-basiert) in neuer Reihenfolge, kommagetrennt.", fr: "Liste complète des pages (base 1) dans le nouvel ordre, séparées par des virgules." },
   "opt.noOptions":           { es: "Sin opciones adicionales.", en: "No additional options.", de: "Keine weiteren Optionen.", fr: "Aucune option supplémentaire." },
 
+  // Reorder interactive UI
+  "reorder.rotateLeft":    { es: "Rotar izquierda", en: "Rotate left", de: "Links drehen", fr: "Rotation gauche" },
+  "reorder.rotateRight":   { es: "Rotar derecha", en: "Rotate right", de: "Rechts drehen", fr: "Rotation droite" },
+  "reorder.delete":        { es: "Eliminar página", en: "Delete page", de: "Seite löschen", fr: "Supprimer la page" },
+  "reorder.selected":      { es: "{0} páginas seleccionadas", en: "{0} pages selected", de: "{0} Seiten ausgewählt", fr: "{0} pages sélectionnées" },
+  "reorder.deselectAll":   { es: "Deseleccionar todo", en: "Deselect all", de: "Alle abwählen", fr: "Tout désélectionner" },
+  "reorder.deleteSelected":{ es: "Eliminar selección", en: "Delete selected", de: "Auswahl löschen", fr: "Supprimer la sélection" },
+  "reorder.thumbSize":     { es: "Tamaño", en: "Size", de: "Größe", fr: "Taille" },
+  "reorder.sizeSlider":    { es: "Tamaño de miniaturas", en: "Thumbnail size", de: "Miniaturengröße", fr: "Taille des miniatures" },
+
   // Thumbnails
   "thumb.loadFailed":   { es: "⚠ No se pudieron cargar las vistas previas. Usa el campo de texto para especificar el orden.", en: "⚠ Previews could not be loaded. Use the text field to specify the order.", de: "⚠ Vorschauen konnten nicht geladen werden. Textfeld zum Angeben der Reihenfolge verwenden.", fr: "⚠ Les aperçus n'ont pas pu être chargés. Utilisez le champ texte pour spécifier l'ordre." },
   "thumb.loading":      { es: "Cargando vistas previas…", en: "Loading previews…", de: "Vorschauen werden geladen…", fr: "Chargement des aperçus…" },
