@@ -77,10 +77,8 @@ function escapeAttr(v: string) {
 
 function clampDpi(v: number) { return Math.max(36, Math.min(600, Math.round(Number.isFinite(v) ? v : 150))); }
 
-function jpegBufToDataUrl(buf: ArrayBuffer): string {
-  const arr = new Uint8Array(buf);
-  let s = ""; for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-  return `data:image/jpeg;base64,${btoa(s)}`;
+function jpegBufToBlobUrl(buf: ArrayBuffer): string {
+  return URL.createObjectURL(new Blob([buf], { type: "image/jpeg" }));
 }
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024;
@@ -97,9 +95,9 @@ window.addEventListener("beforeinstallprompt", (e) => {
 });
 window.addEventListener("appinstalled", () => { deferredInstallPrompt = null; render(); });
 
-// Register service worker
+// Register service worker — use BASE_URL so it works on GitHub Pages subpaths
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => { /* ignore */ });
+  navigator.serviceWorker.register(import.meta.env.BASE_URL + "sw.js").catch(() => { /* ignore */ });
 }
 
 // ─── Workers ──────────────────────────────────────────────
@@ -130,6 +128,7 @@ function requestThumbnails(sf: SelectedFile) {
 }
 
 function clearThumbs(key: string) {
+  for (const url of thumbPages[key] ?? []) URL.revokeObjectURL(url);
   delete thumbPages[key];
   delete thumbTotal[key];
   thumbLoading.delete(key);
@@ -140,7 +139,7 @@ function handleThumbMessage(ev: MessageEvent<ThumbEvent>) {
   const msg = ev.data;
   if (msg.type === "thumb") {
     if (!thumbPages[msg.fileKey]) thumbPages[msg.fileKey] = [];
-    thumbPages[msg.fileKey][msg.index] = jpegBufToDataUrl(msg.jpeg);
+    thumbPages[msg.fileKey][msg.index] = jpegBufToBlobUrl(msg.jpeg);
     thumbTotal[msg.fileKey] = msg.total;
     if (activeTool === "reorder" && files.length === 1 && files[0].key === msg.fileKey && reorderVisualOrder.length === 0) {
       reorderVisualOrder = Array.from({ length: msg.total }, (_, i) => i + 1);
@@ -239,7 +238,14 @@ function handleEngineMessage(ev: MessageEvent<WorkerEvent>) {
   const msg = ev.data;
   if (msg.type === "progress") {
     jobs = jobs.map(j => j.id === msg.jobId ? { ...j, status: "running", progress: msg.progress, progressNote: msg.note } : j);
-    render();
+    const fill = document.querySelector<HTMLElement>(`.jobRow[data-jobid="${msg.jobId}"] .progressFill`);
+    const pct  = document.querySelector<HTMLElement>(`.jobRow[data-jobid="${msg.jobId}"] .progressPct`);
+    if (fill && pct) {
+      fill.style.width = `${msg.progress}%`;
+      pct.textContent  = `${msg.progress}%${msg.note ? ` – ${msg.note}` : ""}`;
+    } else {
+      render();
+    }
   } else if (msg.type === "result") {
     const blob = new Blob([msg.outputBytes], { type: msg.mime });
     jobs = jobs.map(j => j.id === msg.jobId ? { ...j, status: "done", progress: 100, progressNote: undefined, outputName: msg.outputName, outputBlob: blob } : j);
@@ -318,6 +324,28 @@ let bottomPanelCollapsed = false;
 let sidebarCollapsed = false;
 const collapsedGroups = new Set<string>();
 
+const LAYOUT_STORAGE_KEY = "pdf-toolkit-layout-v1";
+
+function saveLayout() {
+  try {
+    const sidebarW = document.documentElement.style.getPropertyValue("--sidebar-w");
+    const panelH   = document.documentElement.style.getPropertyValue("--bottom-panel-h");
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ bottomPanelCollapsed, sidebarCollapsed, sidebarW, panelH }));
+  } catch { /* quota */ }
+}
+
+function loadLayout() {
+  try {
+    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (typeof s.bottomPanelCollapsed === "boolean") bottomPanelCollapsed = s.bottomPanelCollapsed;
+    if (typeof s.sidebarCollapsed === "boolean")     sidebarCollapsed     = s.sidebarCollapsed;
+    if (s.sidebarW) document.documentElement.style.setProperty("--sidebar-w", s.sidebarW);
+    if (s.panelH)   document.documentElement.style.setProperty("--bottom-panel-h", s.panelH);
+  } catch { /* invalid */ }
+}
+
 // ─── Page parsing ─────────────────────────────────────────
 function parsePageList(input: string): number[] {
   const out: number[] = [];
@@ -374,9 +402,15 @@ function validateReorderInput(input: string): VR {
   const t = input.trim();
   if (!t) return { type: "error", msg: "Ingresa el nuevo orden de páginas (ej: 3,1,2)." };
   if (/[^0-9,\s]/.test(t)) return { type: "error", msg: "Solo se permiten números separados por comas." };
-  const nums = t.split(",").map(s => Number(s.trim())).filter(n => s => s);
+  const nums = t.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
   if (nums.some(n => !Number.isInteger(n) || n < 1)) return { type: "error", msg: "Todos los valores deben ser enteros mayores a 0." };
   if (new Set(nums).size !== nums.length) return { type: "error", msg: "Hay páginas duplicadas en el orden." };
+  const totalKnown = files[0] ? thumbTotal[files[0].key] : undefined;
+  if (totalKnown) {
+    const missing = Array.from({ length: totalKnown }, (_, i) => i + 1).filter(p => !nums.includes(p));
+    if (missing.length) return { type: "error", msg: `Faltan páginas en el orden: ${missing.join(", ")}. El PDF tiene ${totalKnown} páginas.` };
+    if (nums.some(n => n > totalKnown)) return { type: "error", msg: `Página fuera de rango. El PDF tiene ${totalKnown} páginas.` };
+  }
   return { type: "ok", msg: `${nums.length} página(s) en el nuevo orden.` };
 }
 
@@ -583,7 +617,7 @@ async function downloadAllCompleted() {
     entries.push({ name, data: new Uint8Array(await j.outputBlob!.arrayBuffer()) });
   }
   const zip = buildZip(entries);
-  downloadBlob(new Blob([zip], { type: "application/zip" }), `resultados_${new Date().toISOString().slice(0, 10)}.zip`);
+  downloadBlob(new Blob([zip.buffer as ArrayBuffer], { type: "application/zip" }), `resultados_${new Date().toISOString().slice(0, 10)}.zip`);
 }
 
 function useJobAsInput(jobId: string) {
@@ -1030,7 +1064,7 @@ function render() {
                     const red = (j.inputSize && outSz && j.toolId === "compress" && outSz < j.inputSize)
                       ? ` (↓${Math.round((1 - outSz / j.inputSize) * 100)}%)` : "";
                     const canUse = j.status === "done" && j.outputBlob && j.outputName?.endsWith(".pdf");
-                    return `<div class="jobRow ${j.status}">
+                    return `<div class="jobRow ${j.status}" data-jobid="${j.id}">
                       <div class="row">
                         <div style="min-width:0">
                           <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${j.toolTitle}</div>
@@ -1044,7 +1078,7 @@ function render() {
                       </div>
                       <div style="margin-top:10px;">
                         <div class="progressBar"><div class="progressFill${j.status === "running" ? " running" : ""}" style="width:${j.progress}%"></div></div>
-                        <div class="kv" style="margin-top:6px;">${j.progress}%${j.progressNote ? ` – ${escapeAttr(j.progressNote)}` : ""}</div>
+                        <div class="progressPct kv" style="margin-top:6px;">${j.progress}%${j.progressNote ? ` – ${escapeAttr(j.progressNote)}` : ""}</div>
                       </div>
                       ${j.error ? `<div class="err">${escapeAttr(j.error)}</div>` : ""}
                       ${j.status === "done" && j.outputBlob && j.outputName ? `
@@ -1108,14 +1142,14 @@ function render() {
 
   // ── IDE panel controls ─────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-action='toggleSidebar']").forEach(b => {
-    b.onclick = () => { sidebarCollapsed = !sidebarCollapsed; render(); };
+    b.onclick = () => { sidebarCollapsed = !sidebarCollapsed; saveLayout(); render(); };
   });
 
   document.getElementById("toggleBottomPanel")?.addEventListener("click", () => {
-    bottomPanelCollapsed = !bottomPanelCollapsed; render();
+    bottomPanelCollapsed = !bottomPanelCollapsed; saveLayout(); render();
   });
   document.getElementById("collapsePanel")?.addEventListener("click", () => {
-    bottomPanelCollapsed = !bottomPanelCollapsed; render();
+    bottomPanelCollapsed = !bottomPanelCollapsed; saveLayout(); render();
   });
 
   // ── Sidebar resize ──────────────────────────────────────
@@ -1135,6 +1169,7 @@ function render() {
         sidebarResizer.classList.remove("active");
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
+        saveLayout();
       };
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
@@ -1158,6 +1193,7 @@ function render() {
         panelResizer.classList.remove("active");
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
+        saveLayout();
       };
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
@@ -1373,7 +1409,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape" && !inInput && files.length > 0) clearFiles();
   if (e.key.toLowerCase() === "t" && !inInput) toggleTheme();
-  if (e.key.toLowerCase() === "b" && !inInput) { sidebarCollapsed = !sidebarCollapsed; render(); }
+  if (e.key.toLowerCase() === "b" && !inInput) { sidebarCollapsed = !sidebarCollapsed; saveLayout(); render(); }
   if ((e.ctrlKey || e.metaKey) && /^[1-9]$/.test(e.key)) {
     const idx = parseInt(e.key) - 1;
     if (TOOLS[idx]) { e.preventDefault(); setActiveTool(TOOLS[idx].id); }
@@ -1383,4 +1419,5 @@ document.addEventListener("keydown", (e) => {
 // ─── Init ────────────────────────────────────────────────
 restoreFromURLHash();
 loadJobsFromStorage();
+loadLayout();
 render();
