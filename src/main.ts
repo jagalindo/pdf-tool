@@ -8,9 +8,9 @@ import { t, getLang, setLang, LANGS, type I18nKey } from "./i18n";
 type SelectedFile = { file: File; key: string; password: string };
 
 const TOOLS: ToolDef[] = [
+  { id: "compress",    accepts: "pdf",   output: "pdf" },
   { id: "merge",       accepts: "pdf",   output: "pdf" },
   { id: "split",       accepts: "pdf",   output: "pdf" },
-  { id: "compress",    accepts: "pdf",   output: "pdf" },
   { id: "pdf2img",     accepts: "pdf",   output: "zip" },
   { id: "rotate",      accepts: "pdf",   output: "pdf" },
   { id: "img2pdf",     accepts: "image", output: "pdf" },
@@ -49,10 +49,10 @@ const TOOL_TAGS: Record<ToolId, I18nKey[]> = {
 };
 
 const TOOL_GROUPS: { nameKey: I18nKey; tools: ToolId[] }[] = [
-  { nameKey: "group.organize", tools: ["merge", "split", "reorder", "deletepages", "rotate"] },
+  { nameKey: "group.organize", tools: ["compress", "merge", "split", "reorder", "deletepages", "rotate"] },
   { nameKey: "group.convert",  tools: ["pdf2img", "img2pdf", "extracttext"] },
   { nameKey: "group.enhance",  tools: ["watermark", "pagenumbers", "metadata", "crop"] },
-  { nameKey: "group.security", tools: ["protect", "compress"] },
+  { nameKey: "group.security", tools: ["protect"] },
 ];
 
 function toolTitle(id: ToolId) { return t(`tool.${id}.title` as I18nKey); }
