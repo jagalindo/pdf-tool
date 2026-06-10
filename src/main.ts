@@ -3,7 +3,7 @@ import type { Job, ToolDef, ToolId } from "./types";
 import type { WorkerEvent, WorkerRequest } from "./worker/messages";
 import type { ThumbEvent } from "./worker/thumb.worker";
 import { buildZip } from "./utils/zip";
-import { t, getLang, setLang, type I18nKey } from "./i18n";
+import { t, getLang, setLang, LANGS, type I18nKey } from "./i18n";
 
 type SelectedFile = { file: File; key: string; password: string };
 
@@ -77,7 +77,8 @@ applyTheme();
 
 // ─── Language ─────────────────────────────────────────────
 function toggleLang() {
-  setLang(getLang() === "es" ? "en" : "es");
+  const idx = LANGS.indexOf(getLang());
+  setLang(LANGS[(idx + 1) % LANGS.length]);
   render();
 }
 
@@ -1124,7 +1125,7 @@ function renderTopbar(): string {
           ${t("topbar.history")}
           ${jobs.length ? `<span class="countBadge">${jobs.length}</span>` : ""}
         </button>
-        <button class="themeBtn" id="langToggle" title="${t("topbar.langTitle")}" style="width:auto;border-radius:999px;padding:0 10px;font-size:12px;font-weight:700;">${getLang().toUpperCase()}</button>
+        <button class="themeBtn" id="langToggle" title="ES / EN / DE / FR" style="width:auto;border-radius:999px;padding:0 10px;font-size:12px;font-weight:700;">${getLang().toUpperCase()}</button>
         <button class="themeBtn" id="themeToggle" title="${t("topbar.themeTitle")}">${themeIcon}</button>
       </div>
     </div>
