@@ -3,24 +3,25 @@ import type { Job, ToolDef, ToolId } from "./types";
 import type { WorkerEvent, WorkerRequest } from "./worker/messages";
 import type { ThumbEvent } from "./worker/thumb.worker";
 import { buildZip } from "./utils/zip";
+import { t, getLang, setLang, LANGS, type I18nKey } from "./i18n";
 
 type SelectedFile = { file: File; key: string; password: string };
 
 const TOOLS: ToolDef[] = [
-  { id: "merge",       title: "Combinar PDFs",       subtitle: "Une varios PDFs en uno solo",                           tags: ["PDF", "Offline", "Rápido"],    accepts: "pdf",   output: "pdf" },
-  { id: "split",       title: "Dividir PDF",          subtitle: "Extrae páginas seleccionadas (ej: 1,3,5-7; 10-12)",    tags: ["Páginas", "Offline", "ZIP"],   accepts: "pdf",   output: "pdf" },
-  { id: "compress",    title: "Comprimir PDF",         subtitle: "Compresión decente vía qpdf-wasm",                    tags: ["WASM", "Offline"],             accepts: "pdf",   output: "pdf" },
-  { id: "pdf2img",     title: "PDF a Imagen",          subtitle: "Renderiza páginas a PNG/JPG en ZIP (MuPDF WASM)",     tags: ["WASM", "Offline", "ZIP"],      accepts: "pdf",   output: "zip" },
-  { id: "rotate",      title: "Rotar páginas",         subtitle: "Rota todas las páginas o un rango (90/180/270°)",     tags: ["Páginas", "Offline"],          accepts: "pdf",   output: "pdf" },
-  { id: "img2pdf",     title: "Imagen a PDF",          subtitle: "Convierte JPG/PNG a un PDF de una o varias páginas",  tags: ["Imágenes", "Offline"],         accepts: "image", output: "pdf" },
-  { id: "protect",     title: "Contraseña PDF",        subtitle: "Añade o quita contraseña de un PDF (AES-256)",        tags: ["Seguridad", "WASM", "Offline"],accepts: "pdf",   output: "pdf" },
-  { id: "deletepages", title: "Eliminar páginas",      subtitle: "Borra páginas específicas de un PDF",                 tags: ["Páginas", "Offline"],          accepts: "pdf",   output: "pdf" },
-  { id: "watermark",   title: "Marca de agua",         subtitle: "Añade texto semitransparente en diagonal",            tags: ["Offline"],                     accepts: "pdf",   output: "pdf" },
-  { id: "pagenumbers", title: "Numerar páginas",        subtitle: "Inserta numeración en el pie de cada página",         tags: ["Offline"],                     accepts: "pdf",   output: "pdf" },
-  { id: "metadata",    title: "Editar metadatos",       subtitle: "Cambia título, autor, tema y palabras clave",         tags: ["Offline"],                     accepts: "pdf",   output: "pdf" },
-  { id: "extracttext", title: "Extraer texto",          subtitle: "Exporta el texto del PDF como archivo .txt",          tags: ["WASM", "Offline"],             accepts: "pdf",   output: "txt" },
-  { id: "crop",        title: "Recortar márgenes",      subtitle: "Reduce el área visible de cada página (CropBox)",    tags: ["Páginas", "Offline"],          accepts: "pdf",   output: "pdf" },
-  { id: "reorder",     title: "Reordenar páginas",      subtitle: "Cambia el orden de las páginas con vista visual",     tags: ["Páginas", "Offline"],          accepts: "pdf",   output: "pdf" },
+  { id: "merge",       accepts: "pdf",   output: "pdf" },
+  { id: "split",       accepts: "pdf",   output: "pdf" },
+  { id: "compress",    accepts: "pdf",   output: "pdf" },
+  { id: "pdf2img",     accepts: "pdf",   output: "zip" },
+  { id: "rotate",      accepts: "pdf",   output: "pdf" },
+  { id: "img2pdf",     accepts: "image", output: "pdf" },
+  { id: "protect",     accepts: "pdf",   output: "pdf" },
+  { id: "deletepages", accepts: "pdf",   output: "pdf" },
+  { id: "watermark",   accepts: "pdf",   output: "pdf" },
+  { id: "pagenumbers", accepts: "pdf",   output: "pdf" },
+  { id: "metadata",    accepts: "pdf",   output: "pdf" },
+  { id: "extracttext", accepts: "pdf",   output: "txt" },
+  { id: "crop",        accepts: "pdf",   output: "pdf" },
+  { id: "reorder",     accepts: "pdf",   output: "pdf" },
 ];
 
 const TOOL_ICONS: Record<string, string> = {
@@ -30,12 +31,32 @@ const TOOL_ICONS: Record<string, string> = {
   extracttext:"📝", crop:"✂", reorder:"↕️",
 };
 
-const TOOL_GROUPS: { name: string; tools: ToolId[] }[] = [
-  { name: "Organizar", tools: ["merge", "split", "reorder", "deletepages", "rotate"] },
-  { name: "Convertir", tools: ["pdf2img", "img2pdf", "extracttext"] },
-  { name: "Mejorar",   tools: ["watermark", "pagenumbers", "metadata", "crop"] },
-  { name: "Seguridad", tools: ["protect", "compress"] },
+const TOOL_TAGS: Record<ToolId, I18nKey[]> = {
+  merge:       ["tag.pdf", "tag.offline", "tag.fast"],
+  split:       ["tag.pages", "tag.offline", "tag.zip"],
+  compress:    ["tag.wasm", "tag.offline"],
+  pdf2img:     ["tag.wasm", "tag.offline", "tag.zip"],
+  rotate:      ["tag.pages", "tag.offline"],
+  img2pdf:     ["tag.images", "tag.offline"],
+  protect:     ["tag.security", "tag.wasm", "tag.offline"],
+  deletepages: ["tag.pages", "tag.offline"],
+  watermark:   ["tag.offline"],
+  pagenumbers: ["tag.offline"],
+  metadata:    ["tag.offline"],
+  extracttext: ["tag.wasm", "tag.offline"],
+  crop:        ["tag.pages", "tag.offline"],
+  reorder:     ["tag.pages", "tag.offline"],
+};
+
+const TOOL_GROUPS: { nameKey: I18nKey; tools: ToolId[] }[] = [
+  { nameKey: "group.organize", tools: ["merge", "split", "reorder", "deletepages", "rotate"] },
+  { nameKey: "group.convert",  tools: ["pdf2img", "img2pdf", "extracttext"] },
+  { nameKey: "group.enhance",  tools: ["watermark", "pagenumbers", "metadata", "crop"] },
+  { nameKey: "group.security", tools: ["protect", "compress"] },
 ];
+
+function toolTitle(id: ToolId) { return t(`tool.${id}.title` as I18nKey); }
+function toolSubtitle(id: ToolId) { return t(`tool.${id}.subtitle` as I18nKey); }
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -53,6 +74,13 @@ function toggleTheme() {
   applyTheme(); render();
 }
 applyTheme();
+
+// ─── Language ─────────────────────────────────────────────
+function toggleLang() {
+  const idx = LANGS.indexOf(getLang());
+  setLang(LANGS[(idx + 1) % LANGS.length]);
+  render();
+}
 
 // ─── Utilities ────────────────────────────────────────────
 function uid() { return `job_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`; }
@@ -180,7 +208,7 @@ function saveJobsToStorage() {
     const toSave = jobs.slice(0, 50).map(({ outputBlob: _ob, ...j }) => ({
       ...j,
       status: (j.status === "running" || j.status === "queued") ? "error" as const : j.status,
-      error: (j.status === "running" || j.status === "queued") ? "Interrumpido" : j.error,
+      error: (j.status === "running" || j.status === "queued") ? t("job.interrupted") : j.error,
     }));
     localStorage.setItem(JOBS_STORAGE_KEY, JSON.stringify(toSave));
   } catch { /* quota */ }
@@ -197,6 +225,10 @@ function loadJobsFromStorage() {
 
 // ─── URL hash state ───────────────────────────────────────
 function updateURLHash() {
+  if (view === "home") {
+    history.replaceState(null, "", location.pathname + location.search);
+    return;
+  }
   const p: Record<string, string> = { t: activeTool };
   if (activeTool === "compress") p.cl = compressLevel;
   if (activeTool === "split") { p.sp = splitPages; p.so = splitOutput; }
@@ -217,6 +249,8 @@ function restoreFromURLHash() {
     const id = h.t as ToolId;
     if (!TOOLS.find(t => t.id === id)) return;
     activeTool = id;
+    view = "tool";
+    currentStep = 1;
     if (h.cl) compressLevel = h.cl as any;
     if (h.sp) splitPages = h.sp;
     if (h.so) splitOutput = h.so as any;
@@ -238,14 +272,18 @@ function handleEngineMessage(ev: MessageEvent<WorkerEvent>) {
   const msg = ev.data;
   if (msg.type === "progress") {
     jobs = jobs.map(j => j.id === msg.jobId ? { ...j, status: "running", progress: msg.progress, progressNote: msg.note } : j);
-    const fill = document.querySelector<HTMLElement>(`.jobRow[data-jobid="${msg.jobId}"] .progressFill`);
-    const pct  = document.querySelector<HTMLElement>(`.jobRow[data-jobid="${msg.jobId}"] .progressPct`);
-    if (fill && pct) {
-      fill.style.width = `${msg.progress}%`;
-      pct.textContent  = `${msg.progress}%${msg.note ? ` – ${msg.note}` : ""}`;
-    } else {
-      render();
-    }
+    const holders = document.querySelectorAll<HTMLElement>(`[data-jobid="${msg.jobId}"]`);
+    let updated = false;
+    holders.forEach(holder => {
+      const fill = holder.querySelector<HTMLElement>(".progressFill");
+      const pct  = holder.querySelector<HTMLElement>(".progressPct");
+      if (fill && pct) {
+        fill.style.width = `${msg.progress}%`;
+        pct.textContent  = `${msg.progress}%${msg.note ? ` – ${msg.note}` : ""}`;
+        updated = true;
+      }
+    });
+    if (!updated) render();
   } else if (msg.type === "result") {
     const blob = new Blob([msg.outputBytes], { type: msg.mime });
     jobs = jobs.map(j => j.id === msg.jobId ? { ...j, status: "done", progress: 100, progressNote: undefined, outputName: msg.outputName, outputBlob: blob } : j);
@@ -263,6 +301,10 @@ function handleEngineMessage(ev: MessageEvent<WorkerEvent>) {
 }
 
 // ─── State ────────────────────────────────────────────────
+let view: "home" | "tool" = "home";
+let currentStep: 1 | 2 | 3 = 1;
+let historyOpen = false;
+let currentJobId: string | null = null;
 let activeTool: ToolId = "merge";
 let files: SelectedFile[] = [];
 let jobs: Job[] = [];
@@ -319,32 +361,8 @@ let thumbDragIdx: number | null = null;
 // shared visual selection (split + delete)
 let visualSelectedPages: number[] = [];
 
-// IDE panel state
-let bottomPanelCollapsed = false;
-let sidebarCollapsed = false;
-const collapsedGroups = new Set<string>();
-
-const LAYOUT_STORAGE_KEY = "pdf-toolkit-layout-v1";
-
-function saveLayout() {
-  try {
-    const sidebarW = document.documentElement.style.getPropertyValue("--sidebar-w");
-    const panelH   = document.documentElement.style.getPropertyValue("--bottom-panel-h");
-    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ bottomPanelCollapsed, sidebarCollapsed, sidebarW, panelH }));
-  } catch { /* quota */ }
-}
-
-function loadLayout() {
-  try {
-    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
-    if (!raw) return;
-    const s = JSON.parse(raw);
-    if (typeof s.bottomPanelCollapsed === "boolean") bottomPanelCollapsed = s.bottomPanelCollapsed;
-    if (typeof s.sidebarCollapsed === "boolean")     sidebarCollapsed     = s.sidebarCollapsed;
-    if (s.sidebarW) document.documentElement.style.setProperty("--sidebar-w", s.sidebarW);
-    if (s.panelH)   document.documentElement.style.setProperty("--bottom-panel-h", s.panelH);
-  } catch { /* invalid */ }
-}
+// Does the active tool have an options step?
+function toolHasOptions(id: ToolId): boolean { return id !== "extracttext"; }
 
 // ─── Page parsing ─────────────────────────────────────────
 function parsePageList(input: string): number[] {
@@ -373,59 +391,63 @@ function parsePageGroups(input: string): { flat: number[]; groups: number[][] } 
 type VR = { type: "error" | "warn" | "ok"; msg: string } | null;
 
 function validatePageInput(input: string): VR {
-  const t = input.trim();
-  if (!t) return { type: "error", msg: "Ingresa al menos una página." };
-  if (/[^0-9,;\s\n\-]/.test(t)) return { type: "error", msg: `Caracteres no válidos. Usa solo números, comas, guiones y punto y coma.` };
-  const { flat, groups } = parsePageGroups(t);
-  if (!flat.length) return { type: "error", msg: "No se encontraron páginas válidas. Usa formato: 1,3,5-7" };
-  if (flat.length > 500) return { type: "warn", msg: `${flat.length} páginas seleccionadas. El proceso puede tardar.` };
-  if (Math.max(...flat) > 10000) return { type: "warn", msg: `Página máxima muy alta. Verifica el PDF.` };
-  return { type: "ok", msg: `${flat.length} página(s)${groups.length > 1 ? ` en ${groups.length} grupos` : ""}.` };
+  const txt = input.trim();
+  if (!txt) return { type: "error", msg: t("val.pagesEmpty") };
+  if (/[^0-9,;\s\n\-]/.test(txt)) return { type: "error", msg: t("val.pagesChars") };
+  const { flat, groups } = parsePageGroups(txt);
+  if (!flat.length) return { type: "error", msg: t("val.pagesNone") };
+  if (flat.length > 500) return { type: "warn", msg: t("val.pagesMany", flat.length) };
+  if (Math.max(...flat) > 10000) return { type: "warn", msg: t("val.pageMaxHigh") };
+  return { type: "ok", msg: t("val.pagesOk", flat.length, groups.length > 1 ? t("val.pagesGroups", groups.length) : "") };
 }
 
 function validateDpiInput(v: number): VR {
-  if (!Number.isFinite(v) || v <= 0) return { type: "error", msg: "Ingresa un número válido entre 36 y 600." };
-  if (v < 36) return { type: "error", msg: `DPI mínimo: 36.` };
-  if (v > 600) return { type: "error", msg: `DPI máximo: 600.` };
-  if (v > 300) return { type: "warn", msg: `DPI alto (${v}). Las imágenes serán grandes.` };
-  return { type: "ok", msg: `${v} DPI.` };
+  if (!Number.isFinite(v) || v <= 0) return { type: "error", msg: t("val.dpiInvalid") };
+  if (v < 36) return { type: "error", msg: t("val.dpiMin") };
+  if (v > 600) return { type: "error", msg: t("val.dpiMax") };
+  if (v > 300) return { type: "warn", msg: t("val.dpiHigh", v) };
+  return { type: "ok", msg: t("val.dpiOk", v) };
 }
 
 function validateProtectPassword(pwd: string, confirm: string): VR {
-  if (!pwd) return { type: "error", msg: "Ingresa una contraseña nueva." };
-  if (pwd !== confirm) return { type: "error", msg: "Las contraseñas no coinciden." };
-  if (pwd.length < 4) return { type: "warn", msg: "Contraseña corta. Se recomiendan al menos 8 caracteres." };
-  return { type: "ok", msg: "Contraseña válida." };
+  if (!pwd) return { type: "error", msg: t("val.pwdEmpty") };
+  if (pwd !== confirm) return { type: "error", msg: t("val.pwdMismatch") };
+  if (pwd.length < 4) return { type: "warn", msg: t("val.pwdShort") };
+  return { type: "ok", msg: t("val.pwdOk") };
 }
 
 function validateReorderInput(input: string): VR {
-  const t = input.trim();
-  if (!t) return { type: "error", msg: "Ingresa el nuevo orden de páginas (ej: 3,1,2)." };
-  if (/[^0-9,\s]/.test(t)) return { type: "error", msg: "Solo se permiten números separados por comas." };
-  const nums = t.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
-  if (nums.some(n => !Number.isInteger(n) || n < 1)) return { type: "error", msg: "Todos los valores deben ser enteros mayores a 0." };
-  if (new Set(nums).size !== nums.length) return { type: "error", msg: "Hay páginas duplicadas en el orden." };
+  const txt = input.trim();
+  if (!txt) return { type: "error", msg: t("val.reorderEmpty") };
+  if (/[^0-9,\s]/.test(txt)) return { type: "error", msg: t("val.reorderChars") };
+  const nums = txt.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
+  if (nums.some(n => !Number.isInteger(n) || n < 1)) return { type: "error", msg: t("val.reorderInts") };
+  if (new Set(nums).size !== nums.length) return { type: "error", msg: t("val.reorderDupes") };
   const totalKnown = files[0] ? thumbTotal[files[0].key] : undefined;
   if (totalKnown) {
     const missing = Array.from({ length: totalKnown }, (_, i) => i + 1).filter(p => !nums.includes(p));
-    if (missing.length) return { type: "error", msg: `Faltan páginas en el orden: ${missing.join(", ")}. El PDF tiene ${totalKnown} páginas.` };
-    if (nums.some(n => n > totalKnown)) return { type: "error", msg: `Página fuera de rango. El PDF tiene ${totalKnown} páginas.` };
+    if (missing.length) return { type: "error", msg: t("val.reorderMissing", missing.join(", "), totalKnown) };
+    if (nums.some(n => n > totalKnown)) return { type: "error", msg: t("val.reorderRange", totalKnown) };
   }
-  return { type: "ok", msg: `${nums.length} página(s) en el nuevo orden.` };
+  return { type: "ok", msg: t("val.reorderOk", nums.length) };
 }
 
 function validateFiles(): VR {
   const isImg = activeTool === "img2pdf";
   const isMulti = activeTool === "merge" || activeTool === "img2pdf";
-  if (files.length === 0) return { type: "error", msg: isImg ? "Agrega al menos una imagen." : "Agrega al menos un archivo PDF." };
-  if (activeTool === "merge" && files.length < 2) return { type: "error", msg: "Combinar necesita al menos 2 PDFs." };
-  if (activeTool === "merge" && files.length > MAX_MERGE_FILES) return { type: "error", msg: `Máximo ${MAX_MERGE_FILES} archivos.` };
-  if (!isMulti && files.length > 1) return { type: "warn", msg: "Solo se procesará el primer archivo." };
-  if (files.some(f => f.file.size === 0)) return { type: "error", msg: "Hay un archivo vacío." };
-  if (files.some(f => f.file.size > MAX_FILE_SIZE)) return { type: "error", msg: `Un archivo excede ${prettyBytes(MAX_FILE_SIZE)}.` };
+  if (files.length === 0) return { type: "error", msg: isImg ? t("val.filesNoneImg") : t("val.filesNonePdf") };
+  if (activeTool === "merge" && files.length < 2) return { type: "error", msg: t("val.mergeMin") };
+  if (activeTool === "merge" && files.length > MAX_MERGE_FILES) return { type: "error", msg: t("val.mergeMax", MAX_MERGE_FILES) };
+  if (!isMulti && files.length > 1) return { type: "warn", msg: t("val.onlyFirst") };
+  if (files.some(f => f.file.size === 0)) return { type: "error", msg: t("val.emptyFile") };
+  if (files.some(f => f.file.size > MAX_FILE_SIZE)) return { type: "error", msg: t("val.fileTooBig", prettyBytes(MAX_FILE_SIZE)) };
   const big = files.find(f => f.file.size > WARN_FILE_SIZE);
-  if (big) return { type: "warn", msg: `"${big.file.name}" es grande (${prettyBytes(big.file.size)}).` };
+  if (big) return { type: "warn", msg: t("val.fileBig", big.file.name, prettyBytes(big.file.size)) };
   return null;
+}
+
+function filesOk(): boolean {
+  return files.length > 0 && validateFiles()?.type !== "error";
 }
 
 function canRun(): boolean {
@@ -441,6 +463,11 @@ function canRun(): boolean {
   if (activeTool === "watermark" && !watermarkText.trim()) return false;
   if (activeTool === "reorder" && validateReorderInput(reorderInput)?.type === "error") return false;
   return true;
+}
+
+function syncRunBtn() {
+  const rb = document.getElementById("run") as HTMLButtonElement | null;
+  if (rb) rb.disabled = !canRun();
 }
 
 function renderVH(v: VR): string {
@@ -461,13 +488,13 @@ function onFilesChosen(list: FileList | null) {
   let accepted: File[];
   if (activeTool === "img2pdf") {
     const imgs = all.filter(f => f.type.startsWith("image/") || /\.(jpe?g|png)$/i.test(f.name));
-    if (imgs.length < all.length) alert(`${all.length - imgs.length} archivo(s) ignorado(s): solo se aceptan JPG y PNG.`);
+    if (imgs.length < all.length) alert(t("alert.ignoredImg", all.length - imgs.length));
     accepted = imgs.filter(f => f.size > 0 && f.size <= MAX_FILE_SIZE);
   } else {
     const pdfs = all.filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
-    if (pdfs.length < all.length) alert(`${all.length - pdfs.length} archivo(s) ignorado(s): solo se aceptan PDFs.`);
+    if (pdfs.length < all.length) alert(t("alert.ignoredPdf", all.length - pdfs.length));
     const big = pdfs.find(f => f.size > MAX_FILE_SIZE);
-    if (big) alert(`"${big.name}" excede ${prettyBytes(MAX_FILE_SIZE)} y fue ignorado.`);
+    if (big) alert(t("alert.tooBigIgnored", big.name, prettyBytes(MAX_FILE_SIZE)));
     accepted = pdfs.filter(f => f.size > 0 && f.size <= MAX_FILE_SIZE);
   }
   if (!accepted.length) return;
@@ -477,7 +504,7 @@ function onFilesChosen(list: FileList | null) {
     map.set(key, map.get(key) ?? { file: f, key, password: "" });
   }
   if (activeTool === "merge" && map.size > MAX_MERGE_FILES) {
-    alert(`Máximo ${MAX_MERGE_FILES} archivos. Se aceptaron los primeros ${MAX_MERGE_FILES}.`);
+    alert(t("alert.mergeTrim", MAX_MERGE_FILES));
     files = Array.from(map.values()).slice(0, MAX_MERGE_FILES);
   } else {
     files = Array.from(map.values());
@@ -516,7 +543,25 @@ function setActiveTool(next: ToolId) {
   activeTool = next; files = [];
   reorderVisualOrder = []; reorderInput = "";
   visualSelectedPages = []; splitVisualMode = false; deleteVisualMode = false;
+  view = "tool"; currentStep = 1; currentJobId = null;
   updateURLHash(); render();
+  window.scrollTo({ top: 0 });
+}
+
+function goHome() {
+  view = "home"; currentStep = 1; currentJobId = null;
+  for (const sf of files) clearThumbs(sf.key);
+  files = [];
+  reorderVisualOrder = []; reorderInput = "";
+  visualSelectedPages = []; splitVisualMode = false; deleteVisualMode = false;
+  updateURLHash(); render();
+  window.scrollTo({ top: 0 });
+}
+
+function goToStep(step: 1 | 2 | 3) {
+  currentStep = step;
+  render();
+  window.scrollTo({ top: 0 });
 }
 
 // ─── Job execution ────────────────────────────────────────
@@ -558,7 +603,7 @@ async function buildRequest(jobId: string): Promise<{ req: WorkerRequest; xfers:
     }
     return null;
   } catch (e: any) {
-    alert(`Error leyendo archivo: ${e?.message ?? e}`);
+    alert(t("alert.readError", e?.message ?? e));
     return null;
   }
 }
@@ -570,19 +615,19 @@ async function runJob() {
   if (activeTool === "pdf2img") { const v = validateDpiInput(imgDpi); if (v?.type === "error") { imgDpi = clampDpi(imgDpi); render(); return alert(v.msg); } imgDpi = clampDpi(imgDpi); }
   if (activeTool === "protect" && protectMode === "add") { const v = validateProtectPassword(protectNewPassword, protectConfirmPassword); if (v?.type === "error") return alert(v.msg); }
   if (activeTool === "deletepages" && validatePageInput(deletePagesInput)?.type === "error") return alert(validatePageInput(deletePagesInput)!.msg);
-  if (activeTool === "watermark" && !watermarkText.trim()) return alert("Ingresa el texto de la marca de agua.");
+  if (activeTool === "watermark" && !watermarkText.trim()) return alert(t("alert.watermarkText"));
   if (activeTool === "reorder" && validateReorderInput(reorderInput)?.type === "error") return alert(validateReorderInput(reorderInput)!.msg);
 
   const jobId = uid();
-  const tool = TOOLS.find(t => t.id === activeTool)!;
-  const job: Job = { id: jobId, toolId: activeTool, toolTitle: tool.title, createdAt: Date.now(), status: "queued", progress: 0, inputCount: files.length, inputSize: totalInputSize() };
+  const job: Job = { id: jobId, toolId: activeTool, toolTitle: toolTitle(activeTool), createdAt: Date.now(), status: "queued", progress: 0, inputCount: files.length, inputSize: totalInputSize() };
   jobs = [job, ...jobs];
-  // Auto-expand bottom panel when a job starts
-  bottomPanelCollapsed = false;
+  currentJobId = jobId;
+  currentStep = 3;
   render();
+  window.scrollTo({ top: 0 });
 
   const built = await buildRequest(jobId);
-  if (!built) { jobs = jobs.filter(j => j.id !== jobId); render(); return; }
+  if (!built) { jobs = jobs.filter(j => j.id !== jobId); currentJobId = null; currentStep = toolHasOptions(activeTool) ? 2 : 1; render(); return; }
 
   if (!isJobRunning) {
     isJobRunning = true;
@@ -598,7 +643,7 @@ function cancelAllJobs() {
   engineWorker.terminate();
   engineWorker = createEngineWorker();
   pendingJobs.length = 0;
-  jobs = jobs.map(j => (j.status === "running" || j.status === "queued") ? { ...j, status: "error", progress: 0, progressNote: undefined, error: "Cancelado por el usuario." } : j);
+  jobs = jobs.map(j => (j.status === "running" || j.status === "queued") ? { ...j, status: "error", progress: 0, progressNote: undefined, error: t("job.cancelled") } : j);
   isJobRunning = false;
   saveJobsToStorage();
   render();
@@ -617,7 +662,7 @@ async function downloadAllCompleted() {
     entries.push({ name, data: new Uint8Array(await j.outputBlob!.arrayBuffer()) });
   }
   const zip = buildZip(entries);
-  downloadBlob(new Blob([zip.buffer as ArrayBuffer], { type: "application/zip" }), `resultados_${new Date().toISOString().slice(0, 10)}.zip`);
+  downloadBlob(new Blob([zip.buffer as ArrayBuffer], { type: "application/zip" }), t("history.zipName", new Date().toISOString().slice(0, 10)));
 }
 
 function useJobAsInput(jobId: string) {
@@ -629,59 +674,49 @@ function useJobAsInput(jobId: string) {
   files = [{ file, key, password: "" }];
   reorderVisualOrder = []; reorderInput = "";
   visualSelectedPages = []; splitVisualMode = false; deleteVisualMode = false;
+  if (view !== "tool") view = "tool";
+  currentStep = 1;
+  historyOpen = false;
   requestThumbnails(files[0]);
   render();
-  document.getElementById("toolWorkspace")?.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-// ─── Tool list ────────────────────────────────────────────
+// ─── Tool cards (home) ────────────────────────────────────
 function getFilteredTools() {
   if (!searchQuery.trim()) return TOOLS;
   const q = searchQuery.toLowerCase();
-  return TOOLS.filter(t => t.title.toLowerCase().includes(q) || t.subtitle.toLowerCase().includes(q) || t.tags.some(x => x.toLowerCase().includes(q)));
+  return TOOLS.filter(td =>
+    toolTitle(td.id).toLowerCase().includes(q) ||
+    toolSubtitle(td.id).toLowerCase().includes(q) ||
+    TOOL_TAGS[td.id].some(k => t(k).toLowerCase().includes(q)));
 }
 
-function renderToolBtn(t: ToolDef): string {
-  return `<button class="toolBtn${t.id === activeTool ? " active" : ""}" data-tool="${t.id}">
-    <div class="toolBtnHeader">
-      <span class="toolBtnIcon">${TOOL_ICONS[t.id] ?? "📄"}</span>
-      <span class="toolBtnName">${t.title}</span>
-    </div>
-    <div class="p" style="padding-left:34px;">${t.subtitle}</div>
-    <div class="badges" style="padding-left:34px;">${t.tags.map(x => `<span class="badge">${x}</span>`).join("")}</div>
+function renderToolCard(td: ToolDef): string {
+  return `<button class="toolCard" data-tool="${td.id}">
+    <span class="toolCardIcon">${TOOL_ICONS[td.id] ?? "📄"}</span>
+    <span class="toolCardText">
+      <span class="toolCardTitle">${toolTitle(td.id)}</span>
+      <span class="toolCardSub">${toolSubtitle(td.id)}</span>
+    </span>
   </button>`;
 }
 
-function renderToolsList(filtered: ToolDef[]): string {
-  if (!filtered.length) return `<div class="small" style="padding:10px;">No se encontraron herramientas.</div>`;
-  if (searchQuery.trim()) return filtered.map(renderToolBtn).join("");
+function renderToolGrid(filtered: ToolDef[]): string {
+  if (!filtered.length) return `<div class="small" style="padding:16px;text-align:center;">${t("home.noResults")}</div>`;
+  if (searchQuery.trim()) return `<div class="toolGrid">${filtered.map(renderToolCard).join("")}</div>`;
   return TOOL_GROUPS.map(g => {
-    const gTools = g.tools.map(id => TOOLS.find(t => t.id === id)!).filter(Boolean);
-    const collapsed = collapsedGroups.has(g.name);
-    return `<div class="tool-group">
-      <button class="tool-group-header" data-group="${escapeAttr(g.name)}">
-        <span class="tool-group-arrow${collapsed ? " collapsed" : ""}">▾</span>
-        <span class="tool-group-name">${g.name.toUpperCase()}</span>
-        <span class="tool-group-count">${gTools.length}</span>
-      </button>
-      ${collapsed ? "" : `<div class="tool-group-items">${gTools.map(renderToolBtn).join("")}</div>`}
-    </div>`;
+    const gTools = g.tools.map(id => TOOLS.find(td => td.id === id)!).filter(Boolean);
+    return `<section class="toolGroupSection">
+      <h2 class="toolGroupTitle">${t(g.nameKey)}</h2>
+      <div class="toolGrid">${gTools.map(renderToolCard).join("")}</div>
+    </section>`;
   }).join("");
 }
 
-function bindToolButtons(c: HTMLElement) {
+function bindToolCards(c: HTMLElement) {
   c.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(b => {
     b.onclick = () => setActiveTool(b.dataset.tool as ToolId);
-  });
-  c.querySelectorAll<HTMLButtonElement>("[data-group]").forEach(b => {
-    b.onclick = () => {
-      const name = b.dataset.group!;
-      if (collapsedGroups.has(name)) collapsedGroups.delete(name);
-      else collapsedGroups.add(name);
-      const c2 = document.getElementById("tools")!;
-      c2.innerHTML = renderToolsList(getFilteredTools());
-      bindToolButtons(c2);
-    };
   });
 }
 
@@ -692,14 +727,14 @@ function renderThumbGridReorder(fileKey: string): string {
   const loading = thumbLoading.has(fileKey);
   const failed = thumbFailed.has(fileKey);
 
-  if (failed) return `<div class="small" style="margin-top:8px;">⚠ No se pudieron cargar las vistas previas. Usa el campo de texto para especificar el orden.</div>`;
-  if (!total && loading) return `<div class="small" style="margin-top:8px;"><span class="spinner" style="display:inline-block;margin-right:6px;"></span> Cargando vistas previas…</div>`;
+  if (failed) return `<div class="small" style="margin-top:8px;">${t("thumb.loadFailed")}</div>`;
+  if (!total && loading) return `<div class="small" style="margin-top:8px;"><span class="spinner" style="display:inline-block;margin-right:6px;"></span> ${t("thumb.loading")}</div>`;
   if (!total) return "";
 
   const order = reorderVisualOrder.length === total ? reorderVisualOrder : Array.from({ length: total }, (_, i) => i + 1);
 
   return `
-    <div class="small" style="margin-bottom:4px;">Arrastra las páginas para reordenarlas. El orden se refleja en el campo de texto.</div>
+    <div class="small" style="margin-bottom:4px;">${t("thumb.dragReorder")}</div>
     <div class="thumbGrid" id="thumbGridReorder">
       ${order.map((pageNum, idx) => {
         const src = pages[pageNum - 1];
@@ -714,10 +749,10 @@ function renderThumbGridReorder(fileKey: string): string {
 function renderThumbGridSelect(fileKey: string, selected: number[]): string {
   const pages = thumbPages[fileKey] ?? [];
   const total = thumbTotal[fileKey] ?? 0;
-  if (!total) return `<div class="small" style="margin-top:6px;"><span class="spinner" style="display:inline-block;margin-right:6px;"></span> Cargando vistas previas…</div>`;
+  if (!total) return `<div class="small" style="margin-top:6px;"><span class="spinner" style="display:inline-block;margin-right:6px;"></span> ${t("thumb.loading")}</div>`;
   const selSet = new Set(selected);
   return `
-    <div class="small" style="margin-bottom:4px;">Haz clic en las páginas para seleccionarlas/deseleccionarlas.</div>
+    <div class="small" style="margin-bottom:4px;">${t("thumb.clickSelect")}</div>
     <div class="thumbGrid" id="thumbSelectGrid">
       ${Array.from({ length: total }, (_, i) => i + 1).map(pg => {
         const src = pages[pg - 1];
@@ -729,7 +764,7 @@ function renderThumbGridSelect(fileKey: string, selected: number[]): string {
         </div>`;
       }).join("")}
     </div>
-    ${selected.length ? `<div class="small" style="margin-top:4px;">Seleccionadas: ${selected.join(", ")}</div>` : ""}`;
+    ${selected.length ? `<div class="small" style="margin-top:4px;">${t("thumb.selected", selected.join(", "))}</div>` : ""}`;
 }
 
 // ─── Options panel ────────────────────────────────────────
@@ -744,461 +779,502 @@ function renderOptions(): string {
   const hasThumb = fKey && thumbTotal[fKey];
 
   if (activeTool === "compress") return `<div>
-    <div class="kv">Nivel de compresión</div>
+    <div class="kv">${t("opt.compressLevel")}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-      ${(["small","balanced","best","aggressive"] as const).map(l => `<button class="btn${compressLevel===l?" primary":""}" data-cmpr="${l}">${l==="small"?"Ligera":l==="balanced"?"Equilibrada":l==="best"?"Máxima":"Agresiva"}</button>`).join("")}
+      ${(["small","balanced","best","aggressive"] as const).map(l => `<button class="btn${compressLevel===l?" primary":""}" data-cmpr="${l}">${t(`opt.cmp.${l}` as I18nKey)}</button>`).join("")}
     </div>
-    <div class="small" style="margin-top:6px;">${compressLevel==="small"?"Reescritura rápida sin recompresión.":compressLevel==="balanced"?"Recompresión estándar con flate.":compressLevel==="best"?"Recompresión agresiva + linearización.":"Rasteriza páginas a 150 DPI JPEG — el texto no será seleccionable."}</div>
+    <div class="small" style="margin-top:6px;">${t(`opt.cmp.${compressLevel}Desc` as I18nKey)}</div>
   </div>`;
 
   if (activeTool === "split") {
     const canVisual = !!(hasThumb && !thumbLoading.has(fKey));
     return `<div>
       ${canVisual ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-        <button class="btn${splitVisualMode?" primary":""}" data-splitvis="1">🖼 Modo visual</button>
-        <button class="btn${!splitVisualMode?" primary":""}" data-splitvis="0">✏ Modo texto</button>
+        <button class="btn${splitVisualMode?" primary":""}" data-splitvis="1">${t("opt.visualMode")}</button>
+        <button class="btn${!splitVisualMode?" primary":""}" data-splitvis="0">${t("opt.textMode")}</button>
       </div>` : ""}
       ${splitVisualMode && canVisual ? renderThumbGridSelect(fKey, visualSelectedPages) : `
-        <div class="kv">Páginas</div>
-        <input id="pages" class="input${pv?.type==="error"?" invalid":pv?.type==="ok"?" valid":""}" value="${escapeAttr(splitPages)}" placeholder="ej: 1,2,5-7; 10-12" style="margin-top:6px;" />
+        <div class="kv">${t("opt.pages")}</div>
+        <input id="pages" class="input${pv?.type==="error"?" invalid":pv?.type==="ok"?" valid":""}" value="${escapeAttr(splitPages)}" placeholder="${t("opt.pagesPlaceholder")}" style="margin-top:6px;" />
         <div id="pageHint">${renderVH(pv)}</div>
-        <div class="small" style="margin-top:4px;">Formato: 1,3,5-7 (1-based). Separa con ; para múltiples PDFs en ZIP.</div>
+        <div class="small" style="margin-top:4px;">${t("opt.splitFormat")}</div>
       `}
-      <div class="kv" style="margin-top:12px;">Salida</div>
+      <div class="kv" style="margin-top:12px;">${t("opt.output")}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-        ${(["single","zip"] as const).map(m => `<button class="btn${splitOutput===m?" primary":""}" data-splitout="${m}">${m==="single"?"PDF único":"ZIP (un PDF por rango)"}</button>`).join("")}
+        ${(["single","zip"] as const).map(m => `<button class="btn${splitOutput===m?" primary":""}" data-splitout="${m}">${m==="single"?t("opt.singlePdf"):t("opt.zipPerRange")}</button>`).join("")}
       </div>
     </div>`;
   }
 
   if (activeTool === "pdf2img") return `<div>
-    <div class="kv">Formato</div>
+    <div class="kv">${t("opt.format")}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
       ${(["png","jpg"] as const).map(f => `<button class="btn${imgFormat===f?" primary":""}" data-imgfmt="${f}">${f.toUpperCase()}</button>`).join("")}
     </div>
-    <div class="kv" style="margin-top:10px;">DPI (36–600)</div>
+    <div class="kv" style="margin-top:10px;">${t("opt.dpi")}</div>
     <input id="dpi" type="number" min="36" max="600" class="input${dv?.type==="error"?" invalid":dv?.type==="ok"?" valid":""}" value="${imgDpi}" style="margin-top:6px;" />
     <div id="dpiHint">${renderVH(dv)}</div>
-    <div class="small" style="margin-top:4px;">Genera un ZIP con todas las páginas. Mayor DPI = mayor calidad.</div>
+    <div class="small" style="margin-top:4px;">${t("opt.pdf2imgNote")}</div>
   </div>`;
 
   if (activeTool === "rotate") return `<div>
-    <div class="kv">Ángulo</div>
+    <div class="kv">${t("opt.angle")}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
       ${([90,180,270] as const).map(a => `<button class="btn${rotateAngle===a?" primary":""}" data-rotangle="${a}">${a===90?"90° →":a===180?"180°":"270° ←"}</button>`).join("")}
     </div>
-    <div class="kv" style="margin-top:12px;">Aplicar a</div>
+    <div class="kv" style="margin-top:12px;">${t("opt.applyTo")}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-      <button class="btn${rotateTarget==="all"?" primary":""}" data-rottgt="all">Todas las páginas</button>
-      <button class="btn${rotateTarget==="range"?" primary":""}" data-rottgt="range">Páginas específicas</button>
+      <button class="btn${rotateTarget==="all"?" primary":""}" data-rottgt="all">${t("opt.allPages")}</button>
+      <button class="btn${rotateTarget==="range"?" primary":""}" data-rottgt="range">${t("opt.specificPages")}</button>
     </div>
     ${rotateTarget==="range"?`
-      <input id="rotatePages" class="input${ropv?.type==="error"?" invalid":ropv?.type==="ok"?" valid":""}" value="${escapeAttr(rotatePages)}" placeholder="ej: 1,3,5-7" style="margin-top:8px;" />
+      <input id="rotatePages" class="input${ropv?.type==="error"?" invalid":ropv?.type==="ok"?" valid":""}" value="${escapeAttr(rotatePages)}" placeholder="${t("opt.pagesPlaceholder2")}" style="margin-top:8px;" />
       <div id="rotatePagesHint">${renderVH(ropv)}</div>`:""}
   </div>`;
 
   if (activeTool === "img2pdf") return `<div>
-    <div class="kv">Tamaño de página</div>
+    <div class="kv">${t("opt.pageSize")}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-      <button class="btn${img2pdfLayout==="auto"?" primary":""}" data-img2pdflayout="auto">Auto (tamaño imagen)</button>
+      <button class="btn${img2pdfLayout==="auto"?" primary":""}" data-img2pdflayout="auto">${t("opt.autoSize")}</button>
       <button class="btn${img2pdfLayout==="a4"?" primary":""}" data-img2pdflayout="a4">A4</button>
       <button class="btn${img2pdfLayout==="letter"?" primary":""}" data-img2pdflayout="letter">Letter</button>
     </div>
-    <div class="small" style="margin-top:6px;">Cada imagen → una página. Con A4/Letter la imagen se escala para ajustarse.</div>
+    <div class="small" style="margin-top:6px;">${t("opt.img2pdfNote")}</div>
   </div>`;
 
   if (activeTool === "protect") return `<div>
-    <div class="kv">Modo</div>
+    <div class="kv">${t("opt.mode")}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-      <button class="btn${protectMode==="add"?" primary":""}" data-protmode="add">Añadir contraseña</button>
-      <button class="btn${protectMode==="remove"?" primary":""}" data-protmode="remove">Quitar contraseña</button>
+      <button class="btn${protectMode==="add"?" primary":""}" data-protmode="add">${t("opt.addPassword")}</button>
+      <button class="btn${protectMode==="remove"?" primary":""}" data-protmode="remove">${t("opt.removePassword")}</button>
     </div>
     ${protectMode==="add"?`
       <div style="margin-top:12px;">
-        <div class="kv">Nueva contraseña</div>
-        <input id="newPwd" class="input" type="password" value="${escapeAttr(protectNewPassword)}" placeholder="Contraseña nueva" style="margin-top:6px;" autocomplete="new-password" />
-        <div class="kv" style="margin-top:8px;">Confirmar contraseña</div>
-        <input id="confirmPwd" class="input" type="password" value="${escapeAttr(protectConfirmPassword)}" placeholder="Repetir contraseña" style="margin-top:6px;" autocomplete="new-password" />
+        <div class="kv">${t("opt.newPassword")}</div>
+        <input id="newPwd" class="input" type="password" value="${escapeAttr(protectNewPassword)}" placeholder="${t("opt.newPwdPlaceholder")}" style="margin-top:6px;" autocomplete="new-password" />
+        <div class="kv" style="margin-top:8px;">${t("opt.confirmPassword")}</div>
+        <input id="confirmPwd" class="input" type="password" value="${escapeAttr(protectConfirmPassword)}" placeholder="${t("opt.confirmPwdPlaceholder")}" style="margin-top:6px;" autocomplete="new-password" />
         <div id="pwdHint">${renderVH(pwv)}</div>
       </div>`:`
-      <div class="small" style="margin-top:8px;">Usa el campo de contraseña en el archivo para desencriptar. El PDF resultante no tendrá contraseña.</div>`}
+      <div class="small" style="margin-top:8px;">${t("opt.removeNote")}</div>`}
   </div>`;
 
   if (activeTool === "deletepages") {
     const canVisual = !!(hasThumb && !thumbLoading.has(fKey));
     return `<div>
       ${canVisual ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-        <button class="btn${deleteVisualMode?" primary":""}" data-deletevis="1">🖼 Modo visual</button>
-        <button class="btn${!deleteVisualMode?" primary":""}" data-deletevis="0">✏ Modo texto</button>
+        <button class="btn${deleteVisualMode?" primary":""}" data-deletevis="1">${t("opt.visualMode")}</button>
+        <button class="btn${!deleteVisualMode?" primary":""}" data-deletevis="0">${t("opt.textMode")}</button>
       </div>` : ""}
       ${deleteVisualMode && canVisual ? renderThumbGridSelect(fKey, visualSelectedPages) : `
-        <div class="kv">Páginas a eliminar</div>
-        <input id="deletePages" class="input${dpv?.type==="error"?" invalid":dpv?.type==="ok"?" valid":""}" value="${escapeAttr(deletePagesInput)}" placeholder="ej: 1,3,5-7" style="margin-top:6px;" />
+        <div class="kv">${t("opt.pagesToDelete")}</div>
+        <input id="deletePages" class="input${dpv?.type==="error"?" invalid":dpv?.type==="ok"?" valid":""}" value="${escapeAttr(deletePagesInput)}" placeholder="${t("opt.pagesPlaceholder2")}" style="margin-top:6px;" />
         <div id="deletePagesHint">${renderVH(dpv)}</div>
-        <div class="small" style="margin-top:4px;">Las páginas indicadas serán eliminadas. Las demás se conservan.</div>`}
+        <div class="small" style="margin-top:4px;">${t("opt.deleteNote")}</div>`}
     </div>`;
   }
 
   if (activeTool === "watermark") return `<div>
-    <div class="kv">Texto</div>
-    <input id="wmText" class="input" value="${escapeAttr(watermarkText)}" placeholder="ej: CONFIDENCIAL" style="margin-top:6px;" />
+    <div class="kv">${t("opt.text")}</div>
+    <input id="wmText" class="input" value="${escapeAttr(watermarkText)}" placeholder="${t("opt.wmPlaceholder")}" style="margin-top:6px;" />
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
-      <div><div class="kv">Opacidad (%)</div><input id="wmOpacity" type="number" min="1" max="100" class="input" value="${watermarkOpacity}" style="margin-top:4px;" /></div>
-      <div><div class="kv">Ángulo (°)</div><input id="wmAngle" type="number" min="-180" max="180" class="input" value="${watermarkAngle}" style="margin-top:4px;" /></div>
-      <div><div class="kv">Tamaño (pt)</div><input id="wmSize" type="number" min="8" max="300" class="input" value="${watermarkSize}" style="margin-top:4px;" /></div>
-      <div><div class="kv">Color</div><input id="wmColor" type="color" class="input" value="${watermarkColor}" style="margin-top:4px;height:36px;padding:2px;" /></div>
+      <div><div class="kv">${t("opt.opacity")}</div><input id="wmOpacity" type="number" min="1" max="100" class="input" value="${watermarkOpacity}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.angleDeg")}</div><input id="wmAngle" type="number" min="-180" max="180" class="input" value="${watermarkAngle}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.sizePt")}</div><input id="wmSize" type="number" min="8" max="300" class="input" value="${watermarkSize}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.color")}</div><input id="wmColor" type="color" class="input" value="${watermarkColor}" style="margin-top:4px;height:36px;padding:2px;" /></div>
     </div>
   </div>`;
 
   if (activeTool === "pagenumbers") return `<div>
-    <div class="kv">Posición</div>
+    <div class="kv">${t("opt.position")}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-      <button class="btn${pageNumPosition==="bottom-left"?" primary":""}" data-pgpos="bottom-left">Inf. izquierda</button>
-      <button class="btn${pageNumPosition==="bottom-center"?" primary":""}" data-pgpos="bottom-center">Inf. centro</button>
-      <button class="btn${pageNumPosition==="bottom-right"?" primary":""}" data-pgpos="bottom-right">Inf. derecha</button>
+      <button class="btn${pageNumPosition==="bottom-left"?" primary":""}" data-pgpos="bottom-left">${t("opt.bottomLeft")}</button>
+      <button class="btn${pageNumPosition==="bottom-center"?" primary":""}" data-pgpos="bottom-center">${t("opt.bottomCenter")}</button>
+      <button class="btn${pageNumPosition==="bottom-right"?" primary":""}" data-pgpos="bottom-right">${t("opt.bottomRight")}</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
-      <div><div class="kv">Número inicial</div><input id="pgStart" type="number" min="0" class="input" value="${pageNumStart}" style="margin-top:4px;" /></div>
-      <div><div class="kv">Prefijo</div><input id="pgPrefix" class="input" value="${escapeAttr(pageNumPrefix)}" placeholder="ej: Pág. " style="margin-top:4px;" /></div>
-      <div><div class="kv">Tamaño fuente (pt)</div><input id="pgSize" type="number" min="6" max="72" class="input" value="${pageNumFontSize}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.startNumber")}</div><input id="pgStart" type="number" min="0" class="input" value="${pageNumStart}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.prefix")}</div><input id="pgPrefix" class="input" value="${escapeAttr(pageNumPrefix)}" placeholder="${t("opt.prefixPlaceholder")}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.fontSize")}</div><input id="pgSize" type="number" min="6" max="72" class="input" value="${pageNumFontSize}" style="margin-top:4px;" /></div>
     </div>
   </div>`;
 
   if (activeTool === "metadata") return `<div>
-    <div class="small" style="margin-bottom:8px;">Los campos vacíos conservan los metadatos actuales del PDF.</div>
+    <div class="small" style="margin-bottom:8px;">${t("opt.metaNote")}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-      <div><div class="kv">Título</div><input id="metaTitle" class="input" value="${escapeAttr(metaTitle)}" placeholder="Título" style="margin-top:4px;" /></div>
-      <div><div class="kv">Autor</div><input id="metaAuthor" class="input" value="${escapeAttr(metaAuthor)}" placeholder="Autor" style="margin-top:4px;" /></div>
-      <div><div class="kv">Tema</div><input id="metaSubject" class="input" value="${escapeAttr(metaSubject)}" placeholder="Tema" style="margin-top:4px;" /></div>
-      <div><div class="kv">Palabras clave</div><input id="metaKeywords" class="input" value="${escapeAttr(metaKeywords)}" placeholder="kw1, kw2" style="margin-top:4px;" /></div>
-      <div><div class="kv">Creador</div><input id="metaCreator" class="input" value="${escapeAttr(metaCreator)}" placeholder="Aplicación creadora" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.metaTitle")}</div><input id="metaTitle" class="input" value="${escapeAttr(metaTitle)}" placeholder="${t("opt.metaTitle")}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.metaAuthor")}</div><input id="metaAuthor" class="input" value="${escapeAttr(metaAuthor)}" placeholder="${t("opt.metaAuthor")}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.metaSubject")}</div><input id="metaSubject" class="input" value="${escapeAttr(metaSubject)}" placeholder="${t("opt.metaSubject")}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.metaKeywords")}</div><input id="metaKeywords" class="input" value="${escapeAttr(metaKeywords)}" placeholder="kw1, kw2" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.metaCreator")}</div><input id="metaCreator" class="input" value="${escapeAttr(metaCreator)}" placeholder="${t("opt.metaCreatorPlaceholder")}" style="margin-top:4px;" /></div>
     </div>
   </div>`;
 
   if (activeTool === "extracttext") return `<div>
-    <div class="small">Extrae texto de todas las páginas → archivo <strong>.txt</strong>. Requiere PDF con texto seleccionable (no PDFs escaneados sin OCR).</div>
+    <div class="small">${t("opt.extractNote")}</div>
   </div>`;
 
   if (activeTool === "crop") return `<div>
-    <div class="kv">Unidad</div>
+    <div class="kv">${t("opt.unit")}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-      <button class="btn${cropUnit==="mm"?" primary":""}" data-cropunit="mm">Milímetros (mm)</button>
-      <button class="btn${cropUnit==="pt"?" primary":""}" data-cropunit="pt">Puntos (pt)</button>
+      <button class="btn${cropUnit==="mm"?" primary":""}" data-cropunit="mm">${t("opt.mm")}</button>
+      <button class="btn${cropUnit==="pt"?" primary":""}" data-cropunit="pt">${t("opt.pt")}</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
-      <div><div class="kv">Superior</div><input id="cropTop" type="number" min="0" class="input" value="${cropTop}" style="margin-top:4px;" /></div>
-      <div><div class="kv">Inferior</div><input id="cropBottom" type="number" min="0" class="input" value="${cropBottom}" style="margin-top:4px;" /></div>
-      <div><div class="kv">Izquierdo</div><input id="cropLeft" type="number" min="0" class="input" value="${cropLeft}" style="margin-top:4px;" /></div>
-      <div><div class="kv">Derecho</div><input id="cropRight" type="number" min="0" class="input" value="${cropRight}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.cropTop")}</div><input id="cropTop" type="number" min="0" class="input" value="${cropTop}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.cropBottom")}</div><input id="cropBottom" type="number" min="0" class="input" value="${cropBottom}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.cropLeft")}</div><input id="cropLeft" type="number" min="0" class="input" value="${cropLeft}" style="margin-top:4px;" /></div>
+      <div><div class="kv">${t("opt.cropRight")}</div><input id="cropRight" type="number" min="0" class="input" value="${cropRight}" style="margin-top:4px;" /></div>
     </div>
-    <div class="small" style="margin-top:6px;">Reduce el área visible de todas las páginas. El contenido fuera del recorte queda oculto.</div>
+    <div class="small" style="margin-top:6px;">${t("opt.cropNote")}</div>
   </div>`;
 
   if (activeTool === "reorder") {
     const thumbsReady = hasThumb;
     return `<div>
-      <div class="kv">Nuevo orden de páginas</div>
-      <input id="reorderInput" class="input${rv?.type==="error"?" invalid":rv?.type==="ok"?" valid":""}" value="${escapeAttr(reorderInput)}" placeholder="ej: 3,1,2,4,5" style="margin-top:6px;" />
+      <div class="kv">${t("opt.newOrder")}</div>
+      <input id="reorderInput" class="input${rv?.type==="error"?" invalid":rv?.type==="ok"?" valid":""}" value="${escapeAttr(reorderInput)}" placeholder="${t("opt.reorderPlaceholder")}" style="margin-top:6px;" />
       <div id="reorderHint">${renderVH(rv)}</div>
-      <div class="small" style="margin-top:4px;">Lista completa de páginas (1-based) en el nuevo orden, separadas por comas.</div>
-      ${thumbsReady ? renderThumbGridReorder(fKey) : (thumbLoading.has(fKey) ? `<div class="small" style="margin-top:8px;"><span class="spinner" style="display:inline-block;margin-right:6px;"></span> Cargando vista previa…</div>` : "")}
+      <div class="small" style="margin-top:4px;">${t("opt.reorderNote")}</div>
+      ${thumbsReady ? renderThumbGridReorder(fKey) : (thumbLoading.has(fKey) ? `<div class="small" style="margin-top:8px;"><span class="spinner" style="display:inline-block;margin-right:6px;"></span> ${t("thumb.loading")}</div>` : "")}
     </div>`;
   }
 
-  return `<div class="small">Sin opciones adicionales.</div>`;
+  return `<div class="small">${t("opt.noOptions")}</div>`;
+}
+
+// ─── Job row (history + result) ───────────────────────────
+function renderJobRow(j: Job): string {
+  const outSz = j.outputBlob?.size;
+  const sizeInfo = j.inputSize ? t("job.input", prettyBytes(j.inputSize)) : "";
+  const outInfo = outSz ? t("job.output", prettyBytes(outSz)) : "";
+  const red = (j.inputSize && outSz && j.toolId === "compress" && outSz < j.inputSize)
+    ? ` (↓${Math.round((1 - outSz / j.inputSize) * 100)}%)` : "";
+  const canUse = j.status === "done" && j.outputBlob && j.outputName?.endsWith(".pdf");
+  return `<div class="jobRow ${j.status}" data-jobid="${j.id}">
+    <div class="row">
+      <div style="min-width:0">
+        <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeAttr(j.toolTitle)}</div>
+        <div class="kv">${new Date(j.createdAt).toLocaleString()} • ${t("job.files", j.inputCount)}</div>
+        ${sizeInfo ? `<div class="jobSize">${sizeInfo}${outInfo}${red ? `<span class="reduction">${red}</span>` : ""}</div>` : ""}
+      </div>
+      <div>${j.status === "running"
+        ? `<span class="spinner"></span>`
+        : `<span class="badge${j.status === "done" ? " primary" : j.status === "error" ? " error" : ""}">${j.status === "queued" ? t("job.queued") : j.status === "done" ? t("job.done") : t("job.error")}</span>`}
+      </div>
+    </div>
+    <div style="margin-top:10px;">
+      <div class="progressBar"><div class="progressFill${j.status === "running" ? " running" : ""}" style="width:${j.progress}%"></div></div>
+      <div class="progressPct kv" style="margin-top:6px;">${j.progress}%${j.progressNote ? ` – ${escapeAttr(j.progressNote)}` : ""}</div>
+    </div>
+    ${j.error ? `<div class="err">${escapeAttr(j.error)}</div>` : ""}
+    ${j.status === "done" && j.outputBlob && j.outputName ? `
+      <div class="successMsg">${t("job.success")}</div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        <button class="btn primary" data-dl="${j.id}">⬇ ${escapeAttr(j.outputName)}</button>
+        ${canUse ? `<button class="btn" data-useinput="${j.id}">${t("btn.useAsInput")}</button>` : ""}
+      </div>` : ""}
+  </div>`;
+}
+
+// ─── Wizard pieces ────────────────────────────────────────
+function renderStepper(): string {
+  const stepsList: Array<{ step: 1 | 2 | 3; label: string }> = toolHasOptions(activeTool)
+    ? [{ step: 1, label: t("step.1") }, { step: 2, label: t("step.2") }, { step: 3, label: t("step.3") }]
+    : [{ step: 1, label: t("step.1") }, { step: 3, label: t("step.3") }];
+  return `<div class="stepper">
+    ${stepsList.map((s, i) => {
+      const state = s.step === currentStep ? "current" : s.step < currentStep ? "done" : "todo";
+      const clickable = s.step < currentStep;
+      return `${i > 0 ? `<div class="stepLine${s.step <= currentStep ? " active" : ""}"></div>` : ""}
+        <button class="step ${state}" data-step="${s.step}" ${clickable ? "" : "disabled"}>
+          <span class="stepNum">${state === "done" ? "✓" : i + 1}</span>
+          <span class="stepLabel">${s.label}</span>
+        </button>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderStep1(): string {
+  const isImg = activeTool === "img2pdf";
+  const isMulti = activeTool === "merge" || activeTool === "img2pdf";
+  const fileVal = files.length > 0 ? validateFiles() : null;
+  return `
+    <div class="drop" id="drop">
+      <div class="dropIcon">⬆</div>
+      <div class="dropTitle">${isImg ? t("drop.titleImg") : t("drop.titlePdf")}</div>
+      <div class="small">${isImg ? t("drop.hintImg") : t("drop.hintPdf")}</div>
+    </div>
+    <div class="files" id="files">
+      ${isMulti && files.length > 1 ? `<div class="small" style="margin-bottom:2px;">${t("files.reorderHint")}</div>` : ""}
+      ${files.length === 0
+        ? `<div class="small">${t("files.none")}</div>`
+        : files.map((f, idx) => {
+            const th0 = thumbPages[f.key]?.[0];
+            const tl = thumbLoading.has(f.key);
+            const tf = thumbFailed.has(f.key);
+            const tc = thumbTotal[f.key];
+            return `<div class="fileRow" data-idx="${idx}">
+              ${isMulti && files.length > 1 ? `<div class="dragHandle" title="${t("files.dragTitle")}" aria-hidden="true">↕</div>` : ""}
+              ${!isImg ? (th0 ? `<img class="filePrev" src="${th0}" alt="p1" />` : tl ? `<div class="filePrevSkeleton"></div>` : tf ? `<div class="icon">🔒</div>` : `<div class="icon">📄</div>`) : `<div class="icon">🖼️</div>`}
+              <div class="fileInfo">
+                <div class="fileName">${escapeAttr(f.file.name)}</div>
+                <div class="fileMeta">${prettyBytes(f.file.size)}${tc ? ` • <span class="pgCount">${t("files.pageChip", tc)}</span>` : tl ? ` • <span class="pgCount">…</span>` : ""}</div>
+              </div>
+              ${!isImg ? `<div class="filePassword">
+                <input class="input" data-pass="${idx}" value="${escapeAttr(f.password ?? "")}" placeholder="${t("files.passwordPlaceholder")}" autocomplete="off" />
+                <div class="small">${t("files.passwordNote")}</div>
+              </div>` : ""}
+              <button class="btn" data-rm="${idx}">${t("btn.remove")}</button>
+            </div>`;
+          }).join("")}
+      ${renderVH(fileVal)}
+    </div>
+    <div class="wizardFooter">
+      <button class="btn" id="pick">${t("btn.upload")}</button>
+      <button class="btn" id="clear" ${files.length ? "" : "disabled"}>${t("btn.clear")}</button>
+      <span style="flex:1"></span>
+      <button class="btn primary big" id="continueBtn" ${filesOk() ? "" : "disabled"}>${toolHasOptions(activeTool) ? t("btn.continue") : t("btn.run")}</button>
+    </div>`;
+}
+
+function renderStep2(): string {
+  const runOk = canRun();
+  return `
+    <div class="optionsPane">
+      <div class="p" style="margin-bottom:12px;">${t("misc.workerNote")}</div>
+      ${renderOptions()}
+    </div>
+    <div class="wizardFooter">
+      <button class="btn" id="backBtn">${t("btn.back")}</button>
+      <span style="flex:1"></span>
+      <button class="btn primary big" id="run" ${runOk ? "" : "disabled"}>
+        ${isJobRunning ? t("btn.running") : pendingJobs.length > 0 ? t("btn.queued", pendingJobs.length + 1) : t("btn.run")}
+      </button>
+    </div>`;
+}
+
+function renderStep3(): string {
+  const job = currentJobId ? jobs.find(j => j.id === currentJobId) : undefined;
+  if (!job) return `<div class="resultCard">
+    <div class="small">${t("result.none")}</div>
+    <div class="wizardFooter"><button class="btn" id="startOverBtn">${t("btn.startOver")}</button></div>
+  </div>`;
+
+  if (job.status === "running" || job.status === "queued") {
+    return `<div class="resultCard" data-jobid="${job.id}">
+      <div class="resultIcon"><span class="spinner big"></span></div>
+      <div class="resultTitle">${job.status === "queued" ? t("result.queuedTitle") : t("result.workingTitle")}</div>
+      <div style="margin-top:16px;max-width:420px;margin-left:auto;margin-right:auto;">
+        <div class="progressBar"><div class="progressFill${job.status === "running" ? " running" : ""}" style="width:${job.progress}%"></div></div>
+        <div class="progressPct kv" style="margin-top:8px;">${job.progress}%${job.progressNote ? ` – ${escapeAttr(job.progressNote)}` : ""}</div>
+      </div>
+      <div class="wizardFooter" style="justify-content:center;">
+        <button class="btn danger" id="cancel">${t("btn.cancel")}${pendingJobs.length > 0 ? ` (${pendingJobs.length + 1})` : ""}</button>
+      </div>
+    </div>`;
+  }
+
+  if (job.status === "error") {
+    return `<div class="resultCard" data-jobid="${job.id}">
+      <div class="resultIcon error">✕</div>
+      <div class="resultTitle">${t("result.errorTitle")}</div>
+      ${job.error ? `<div class="err" style="display:inline-block;margin-top:12px;">${escapeAttr(job.error)}</div>` : ""}
+      <div class="wizardFooter" style="justify-content:center;">
+        <button class="btn primary big" id="tryAgainBtn">${t("btn.tryAgain")}</button>
+        <button class="btn" id="startOverBtn">${t("btn.startOver")}</button>
+      </div>
+    </div>`;
+  }
+
+  // done
+  const canUse = job.outputBlob && job.outputName?.endsWith(".pdf");
+  const outSz = job.outputBlob?.size;
+  const red = (job.inputSize && outSz && job.toolId === "compress" && outSz < job.inputSize)
+    ? ` (↓${Math.round((1 - outSz / job.inputSize) * 100)}%)` : "";
+  return `<div class="resultCard success" data-jobid="${job.id}">
+    <div class="resultIcon success">✓</div>
+    <div class="resultTitle">${t("result.doneTitle")}</div>
+    <div class="p" style="font-size:13px;">${t("result.doneSub")}</div>
+    ${job.inputSize && outSz ? `<div class="jobSize" style="margin-top:8px;">${t("job.input", prettyBytes(job.inputSize))}${t("job.output", prettyBytes(outSz))}${red ? `<span class="reduction">${red}</span>` : ""}</div>` : ""}
+    <div class="wizardFooter" style="justify-content:center;flex-wrap:wrap;">
+      <button class="btn primary big" data-dl="${job.id}">${t("result.download", escapeAttr(job.outputName ?? ""))}</button>
+      ${canUse ? `<button class="btn" data-useinput="${job.id}">${t("btn.useAsInput")}</button>` : ""}
+      <button class="btn" id="startOverBtn">${t("btn.startOver")}</button>
+    </div>
+  </div>`;
+}
+
+// ─── Top bar ──────────────────────────────────────────────
+function renderTopbar(): string {
+  const themeIcon = currentTheme === "light" ? "🌙" : "☀️";
+  const hasRunning = isJobRunning || pendingJobs.length > 0;
+  return `<div class="topbar">
+    <div class="topbar-inner">
+      <button class="brand" id="brandBtn" title="${t("app.name")}">
+        <div class="logo">📄</div>
+        <div class="brandText">
+          <div class="h1">${t("app.name")}</div>
+          <div class="p">${t("app.tagline")}</div>
+        </div>
+      </button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        ${deferredInstallPrompt ? `<button id="installBtn" title="${t("topbar.installTitle")}">${t("topbar.install")}</button>` : ""}
+        <button class="btn historyBtn${historyOpen ? " primary" : ""}" id="historyBtn">
+          ${hasRunning ? `<span class="spinner" style="width:10px;height:10px;border-width:2px;"></span>` : "🕘"}
+          ${t("topbar.history")}
+          ${jobs.length ? `<span class="countBadge">${jobs.length}</span>` : ""}
+        </button>
+        <button class="themeBtn" id="langToggle" title="ES / EN / DE / FR" style="width:auto;border-radius:999px;padding:0 10px;font-size:12px;font-weight:700;">${getLang().toUpperCase()}</button>
+        <button class="themeBtn" id="themeToggle" title="${t("topbar.themeTitle")}">${themeIcon}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─── History drawer ───────────────────────────────────────
+function renderHistoryDrawer(): string {
+  const completedJobs = jobs.filter(j => j.status === "done" && j.outputBlob);
+  return `
+    <div class="drawerOverlay${historyOpen ? " open" : ""}" id="drawerOverlay"></div>
+    <aside class="historyDrawer${historyOpen ? " open" : ""}" id="historyDrawer">
+      <div class="drawerHeader">
+        <div class="h2" style="font-size:15px;">🕘 ${t("topbar.history")} ${jobs.length ? `<span class="countBadge">${jobs.length}</span>` : ""}</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          ${completedJobs.length > 1 ? `<button class="btn" style="font-size:11px;padding:4px 10px;" id="dlAll">${t("btn.downloadAll", completedJobs.length)}</button>` : ""}
+          <button class="btn" style="font-size:11px;padding:4px 10px;" id="clearJobs" ${jobs.length ? "" : "disabled"}>${t("btn.clear")}</button>
+          <button class="icon-btn" id="closeDrawer" title="✕">✕</button>
+        </div>
+      </div>
+      <div class="drawerBody">
+        <div class="jobs">
+          ${jobs.length === 0 ? `<div class="small">${t("history.empty")}</div>` : jobs.map(renderJobRow).join("")}
+        </div>
+      </div>
+    </aside>`;
 }
 
 // ─── Main render ──────────────────────────────────────────
 function render() {
-  // Preserve scroll positions across re-renders
-  const prevWorkspaceScroll = document.getElementById("toolWorkspace")?.scrollTop ?? 0;
-  const prevPanelScroll = document.querySelector<HTMLElement>(".panel-body")?.scrollTop ?? 0;
+  const prevScrollY = window.scrollY;
+  const prevDrawerScroll = document.querySelector<HTMLElement>(".drawerBody")?.scrollTop ?? 0;
 
   updateURLHash();
-  const tool = TOOLS.find(t => t.id === activeTool)!;
-  const filtered = getFilteredTools();
-  const themeIcon = currentTheme === "light" ? "🌙" : "☀️";
+  document.title = t("doc.title");
   const isImg = activeTool === "img2pdf";
   const isMulti = activeTool === "merge" || activeTool === "img2pdf";
-  const runOk = canRun();
-  const fileVal = files.length > 0 ? validateFiles() : null;
-  const hasRunning = isJobRunning || pendingJobs.length > 0;
-  const completedJobs = jobs.filter(j => j.status === "done" && j.outputBlob);
 
-  app.innerHTML = `
-    <div class="topbar">
-      <div class="topbar-inner">
-        <div class="brand">
-          <div class="logo">📄</div>
-          <div>
-            <div class="h1">PDF Toolkit</div>
-            <div class="p">100% local · Sin subida</div>
-          </div>
+  if (view === "home") {
+    app.innerHTML = `
+      ${renderTopbar()}
+      <main class="home">
+        <div class="hero">
+          <h1 class="heroTitle">${t("app.name")}</h1>
+          <p class="heroSub">🔒 ${t("app.hero")}</p>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          ${deferredInstallPrompt ? `<button id="installBtn" title="Instalar como app">⬇ Instalar</button>` : ""}
-          <button class="themeBtn" id="themeToggle" title="Cambiar tema (T)">${themeIcon}</button>
+        <div class="homeSearch">
+          <input id="search" class="input" placeholder="${t("home.searchPlaceholder")}" value="${escapeAttr(searchQuery)}" />
         </div>
-      </div>
-    </div>
-
-    <div class="ide-body">
-
-      <aside class="sidebar${sidebarCollapsed ? " collapsed" : ""}" id="sidebar">
-        <div class="sidebar-header">
-          <span class="sidebar-title">Herramientas</span>
-          <button class="icon-btn" data-action="toggleSidebar" title="Colapsar barra lateral">◀</button>
-        </div>
-        <div class="sidebar-search">
-          <input id="search" class="input" placeholder="Buscar herramientas…" value="${escapeAttr(searchQuery)}" style="font-size:12px;padding:7px 10px;" />
-        </div>
-        <div class="sidebar-tools tools" id="tools"></div>
-      </aside>
-
-      <div class="sidebar-resizer" id="sidebarResizer"></div>
-
-      <div class="main-col">
-
-        <div class="tool-workspace" id="toolWorkspace">
-
-          <div class="workspace-header">
-            <div class="breadcrumb">
-              ${sidebarCollapsed ? `<button class="icon-btn" data-action="toggleSidebar" title="Mostrar barra lateral" style="margin-right:4px;">☰</button>` : ""}
-              <span class="breadcrumb-root">PDF Toolkit</span>
-              <span class="breadcrumb-sep">›</span>
-              <span class="breadcrumb-active">${TOOL_ICONS[activeTool] ?? "📄"} ${tool.title}</span>
-            </div>
-            <div class="workspace-actions">
-              <button class="btn" id="pick">Subir</button>
-              <button class="btn" id="clear" ${files.length ? "" : "disabled"}>Limpiar</button>
-              ${hasRunning ? `<button class="btn danger" id="cancel">✕ Cancelar${pendingJobs.length > 0 ? " (" + (pendingJobs.length + 1) + ")" : ""}</button>` : ""}
-              <button class="btn primary" id="run" ${runOk ? "" : "disabled"}>
-                ${isJobRunning ? "Procesando…" : pendingJobs.length > 0 ? `En cola (${pendingJobs.length + 1})…` : "Ejecutar"}
-              </button>
-            </div>
-          </div>
-
-          <div class="workspace-inner">
-
-            <div class="tool-intro">
-              <div class="h2">${tool.title}</div>
-              <div class="p">${tool.subtitle}</div>
-              <div class="badges" style="margin-top:8px;">
-                ${tool.tags.map(t => `<span class="badge">${t}</span>`).join("")}
-                <span class="badge primary">Modo privado</span>
-              </div>
-            </div>
-
-            <div class="split"></div>
-
-            <div class="drop" id="drop">
-              <div class="dropIcon">⬆</div>
-              <div class="dropTitle">${isImg ? "Arrastra imágenes aquí" : "Arrastra PDFs aquí"}</div>
-              <div class="small">${isImg ? "JPG y PNG admitidos" : "o haz clic en <strong>Subir</strong>"}</div>
-            </div>
-
-            <div class="files" id="files">
-              ${isMulti && files.length > 1 ? `<div class="small" style="margin-bottom:2px;">Arrastra los nombres para reordenar.</div>` : ""}
-              ${files.length === 0
-                ? `<div class="small">Sin archivos seleccionados.</div>`
-                : files.map((f, idx) => {
-                    const th0 = thumbPages[f.key]?.[0];
-                    const tl = thumbLoading.has(f.key);
-                    const tf = thumbFailed.has(f.key);
-                    const tc = thumbTotal[f.key];
-                    return `<div class="fileRow" data-idx="${idx}">
-                      ${isMulti && files.length > 1 ? `<div class="dragHandle" title="Reordenar" aria-hidden="true">↕</div>` : ""}
-                      ${!isImg ? (th0 ? `<img class="filePrev" src="${th0}" alt="p1" />` : tl ? `<div class="filePrevSkeleton"></div>` : tf ? `<div class="icon">🔒</div>` : `<div class="icon">📄</div>`) : `<div class="icon">🖼️</div>`}
-                      <div class="fileInfo">
-                        <div class="fileName">${escapeAttr(f.file.name)}</div>
-                        <div class="fileMeta">${prettyBytes(f.file.size)}${tc ? ` • <span class="pgCount">${tc} pág.</span>` : tl ? ` • <span class="pgCount">…</span>` : ""}</div>
-                      </div>
-                      ${!isImg ? `<div class="filePassword">
-                        <input class="input" data-pass="${idx}" value="${escapeAttr(f.password ?? "")}" placeholder="Contraseña (si protegido)" autocomplete="off" />
-                        <div class="small">Solo en tu navegador.</div>
-                      </div>` : ""}
-                      <button class="btn" data-rm="${idx}">Quitar</button>
-                    </div>`;
-                  }).join("")}
-              ${renderVH(fileVal)}
-            </div>
-
-            <div class="split"></div>
-
+        <div id="toolGridWrap">${renderToolGrid(getFilteredTools())}</div>
+      </main>
+      ${renderHistoryDrawer()}`;
+  } else {
+    app.innerHTML = `
+      ${renderTopbar()}
+      <main class="wizard">
+        <div class="wizardHeader">
+          <button class="btn" id="backToTools">${t("wizard.backToTools")}</button>
+          <div class="wizardTitle">
+            <span class="wizardIcon">${TOOL_ICONS[activeTool] ?? "📄"}</span>
             <div>
-              <div class="h1">Opciones</div>
-              <div class="p">Procesado en un Web Worker — sin subida de datos.</div>
-              <div style="margin-top:12px;">${renderOptions()}</div>
+              <div class="h2">${toolTitle(activeTool)}</div>
+              <div class="p">${toolSubtitle(activeTool)}</div>
             </div>
-
-            <div class="small" style="margin-top:24px;text-align:center;opacity:.5;">
-              Atajos: Ctrl+O abrir · Enter ejecutar · Esc limpiar · Ctrl+1–9 herramienta · T tema
-            </div>
-
+          </div>
+          <div class="badges wizardBadges">
+            ${TOOL_TAGS[activeTool].map(k => `<span class="badge">${t(k)}</span>`).join("")}
+            <span class="badge primary">${t("tag.private")}</span>
           </div>
         </div>
-
-        <div class="panel-resizer" id="panelResizer"></div>
-
-        <div class="bottom-panel${bottomPanelCollapsed ? " collapsed" : ""}" id="bottomPanel">
-          <div class="panel-tabbar">
-            <button class="panel-tab active" id="toggleBottomPanel">
-              HISTORIAL
-              ${hasRunning ? `<span class="spinner" style="width:10px;height:10px;border-width:2px;margin-left:4px;"></span>` : ""}
-              ${jobs.length ? `<span class="panel-badge">${jobs.length}</span>` : ""}
-            </button>
-            <div class="panel-actions">
-              ${completedJobs.length > 1 ? `<button class="btn" style="font-size:11px;padding:4px 10px;" id="dlAll">⬇ Todos (${completedJobs.length})</button>` : ""}
-              <button class="btn" style="font-size:11px;padding:4px 10px;" id="clearJobs" ${jobs.length ? "" : "disabled"}>Limpiar</button>
-              <button class="icon-btn" id="collapsePanel" title="${bottomPanelCollapsed ? "Expandir panel" : "Colapsar panel"}">${bottomPanelCollapsed ? "▲" : "▼"}</button>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="jobs">
-              ${jobs.length === 0
-                ? `<div class="small">Sin trabajos aún.</div>`
-                : jobs.map(j => {
-                    const outSz = j.outputBlob?.size;
-                    const sizeInfo = j.inputSize ? `Entrada: ${prettyBytes(j.inputSize)}` : "";
-                    const outInfo = outSz ? ` → Salida: ${prettyBytes(outSz)}` : "";
-                    const red = (j.inputSize && outSz && j.toolId === "compress" && outSz < j.inputSize)
-                      ? ` (↓${Math.round((1 - outSz / j.inputSize) * 100)}%)` : "";
-                    const canUse = j.status === "done" && j.outputBlob && j.outputName?.endsWith(".pdf");
-                    return `<div class="jobRow ${j.status}" data-jobid="${j.id}">
-                      <div class="row">
-                        <div style="min-width:0">
-                          <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${j.toolTitle}</div>
-                          <div class="kv">${new Date(j.createdAt).toLocaleString()} • ${j.inputCount} archivo(s)</div>
-                          ${sizeInfo ? `<div class="jobSize">${sizeInfo}${outInfo}${red ? `<span class="reduction">${red}</span>` : ""}</div>` : ""}
-                        </div>
-                        <div>${j.status === "running"
-                          ? `<span class="spinner"></span>`
-                          : `<span class="badge${j.status === "done" ? " primary" : j.status === "error" ? " error" : ""}">${j.status === "queued" ? "En cola" : j.status === "done" ? "Completado" : "Error"}</span>`}
-                        </div>
-                      </div>
-                      <div style="margin-top:10px;">
-                        <div class="progressBar"><div class="progressFill${j.status === "running" ? " running" : ""}" style="width:${j.progress}%"></div></div>
-                        <div class="progressPct kv" style="margin-top:6px;">${j.progress}%${j.progressNote ? ` – ${escapeAttr(j.progressNote)}` : ""}</div>
-                      </div>
-                      ${j.error ? `<div class="err">${escapeAttr(j.error)}</div>` : ""}
-                      ${j.status === "done" && j.outputBlob && j.outputName ? `
-                        <div class="successMsg">Proceso completado exitosamente.</div>
-                        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                          <button class="btn primary" data-dl="${j.id}">⬇ ${escapeAttr(j.outputName)}</button>
-                          ${canUse ? `<button class="btn" data-useinput="${j.id}">Usar como entrada</button>` : ""}
-                        </div>` : ""}
-                    </div>`;
-                  }).join("")}
-            </div>
-          </div>
+        ${renderStepper()}
+        <div class="wizardPane">
+          ${currentStep === 1 ? renderStep1() : currentStep === 2 ? renderStep2() : renderStep3()}
         </div>
+        <div class="small" style="margin-top:24px;text-align:center;opacity:.5;">${t("misc.shortcuts")}</div>
+      </main>
+      ${renderHistoryDrawer()}`;
+  }
 
-      </div>
-    </div>
+  // ── Topbar bindings ─────────────────────────────────────
+  document.getElementById("brandBtn")!.onclick = goHome;
+  document.getElementById("themeToggle")!.onclick = toggleTheme;
+  document.getElementById("langToggle")!.onclick = toggleLang;
+  document.getElementById("installBtn")?.addEventListener("click", () => { deferredInstallPrompt?.prompt(); });
+  document.getElementById("historyBtn")!.onclick = () => { historyOpen = !historyOpen; render(); };
+  document.getElementById("closeDrawer")?.addEventListener("click", () => { historyOpen = false; render(); });
+  document.getElementById("drawerOverlay")?.addEventListener("click", () => { if (historyOpen) { historyOpen = false; render(); } });
+  document.getElementById("clearJobs")?.addEventListener("click", () => { jobs = []; saveJobsToStorage(); render(); });
+  document.getElementById("dlAll")?.addEventListener("click", downloadAllCompleted);
 
-    <div class="statusbar">
-      <button class="status-btn" data-action="toggleSidebar" title="Alternar barra lateral (B)">
-        ${sidebarCollapsed ? "☰" : "⊟"}
-      </button>
-      <span class="status-sep">│</span>
-      <span class="status-item">${TOOL_ICONS[activeTool] ?? "📄"} ${tool.title}</span>
-      ${files.length > 0 ? `<span class="status-sep">│</span><span class="status-item">📁 ${files.length} archivo(s)${files.length === 1 ? " · " + prettyBytes(totalInputSize()) : ""}</span>` : ""}
-      ${isJobRunning ? `<span class="status-sep">│</span><span class="status-item"><span class="spinner-tiny"></span> Procesando…</span>` : ""}
-      ${pendingJobs.length > 0 ? `<span class="status-sep">│</span><span class="status-item">En cola: ${pendingJobs.length}</span>` : ""}
-      <div class="status-right">
-        <span class="status-item">🔒 100% local</span>
-      </div>
-    </div>`;
+  // ── Downloads + use as input (drawer + result) ──────────
+  document.querySelectorAll<HTMLButtonElement>("[data-dl]").forEach(b => {
+    b.onclick = () => { const j = jobs.find(j => j.id === b.dataset.dl); if (j?.outputBlob && j.outputName) downloadBlob(j.outputBlob, j.outputName); };
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-useinput]").forEach(b => {
+    b.onclick = () => useJobAsInput(b.dataset.useinput!);
+  });
 
-  // ── Inject tools list ──────────────────────────────────
-  const toolsEl = document.getElementById("tools")!;
-  toolsEl.innerHTML = renderToolsList(filtered);
-  bindToolButtons(toolsEl);
+  if (view === "home") {
+    const gridWrap = document.getElementById("toolGridWrap")!;
+    bindToolCards(gridWrap);
+    const searchEl = document.getElementById("search") as HTMLInputElement;
+    searchEl.oninput = () => {
+      searchQuery = searchEl.value;
+      gridWrap.innerHTML = renderToolGrid(getFilteredTools());
+      bindToolCards(gridWrap);
+    };
+    const drawer = document.querySelector<HTMLElement>(".drawerBody"); if (drawer) drawer.scrollTop = prevDrawerScroll;
+    window.scrollTo({ top: prevScrollY });
+    return;
+  }
 
-  // ── File input ─────────────────────────────────────────
+  // ── Wizard bindings ─────────────────────────────────────
+  document.getElementById("backToTools")!.onclick = goHome;
+  document.querySelectorAll<HTMLButtonElement>(".step[data-step]").forEach(b => {
+    b.onclick = () => { const s = Number(b.dataset.step) as 1 | 2 | 3; if (s < currentStep) goToStep(s); };
+  });
+
+  // File input (used by drop zone + pick + Ctrl+O)
   const input = document.createElement("input");
   input.type = "file";
   input.accept = isImg ? "image/jpeg,image/png,.jpg,.jpeg,.png" : "application/pdf,.pdf";
   input.multiple = isMulti;
   input.onchange = () => onFilesChosen(input.files);
+  fileInputOpener = () => input.click();
 
-  document.getElementById("pick")!.onclick = () => input.click();
-  document.getElementById("clear")!.onclick = clearFiles;
-  document.getElementById("run")!.onclick = runJob;
+  // Step 1
+  document.getElementById("pick")?.addEventListener("click", () => input.click());
+  document.getElementById("clear")?.addEventListener("click", clearFiles);
+  document.getElementById("continueBtn")?.addEventListener("click", () => {
+    if (!filesOk()) return;
+    if (toolHasOptions(activeTool)) goToStep(2);
+    else runJob();
+  });
+
+  const drop = document.getElementById("drop");
+  if (drop) {
+    drop.addEventListener("click", () => input.click());
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("dragover"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+    drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("dragover"); if (e.dataTransfer?.files) onFilesChosen(e.dataTransfer.files); });
+  }
+
+  // Step 2 / 3 navigation
+  document.getElementById("backBtn")?.addEventListener("click", () => goToStep(1));
+  document.getElementById("run")?.addEventListener("click", runJob);
   document.getElementById("cancel")?.addEventListener("click", cancelAllJobs);
-  document.getElementById("clearJobs")!.onclick = () => { jobs = []; saveJobsToStorage(); render(); };
-  document.getElementById("dlAll")?.addEventListener("click", downloadAllCompleted);
-  document.getElementById("themeToggle")!.onclick = toggleTheme;
-  document.getElementById("installBtn")?.addEventListener("click", () => { deferredInstallPrompt?.prompt(); });
-
-  // ── Search ─────────────────────────────────────────────
-  const searchEl = document.getElementById("search") as HTMLInputElement;
-  searchEl.oninput = () => {
-    searchQuery = searchEl.value;
-    const c = document.getElementById("tools")!;
-    c.innerHTML = renderToolsList(getFilteredTools());
-    bindToolButtons(c);
-  };
-
-  // ── IDE panel controls ─────────────────────────────────
-  document.querySelectorAll<HTMLButtonElement>("[data-action='toggleSidebar']").forEach(b => {
-    b.onclick = () => { sidebarCollapsed = !sidebarCollapsed; saveLayout(); render(); };
-  });
-
-  document.getElementById("toggleBottomPanel")?.addEventListener("click", () => {
-    bottomPanelCollapsed = !bottomPanelCollapsed; saveLayout(); render();
-  });
-  document.getElementById("collapsePanel")?.addEventListener("click", () => {
-    bottomPanelCollapsed = !bottomPanelCollapsed; saveLayout(); render();
-  });
-
-  // ── Sidebar resize ──────────────────────────────────────
-  const sidebarResizer = document.getElementById("sidebarResizer");
-  if (sidebarResizer) {
-    sidebarResizer.addEventListener("mousedown", (e) => {
-      if (sidebarCollapsed) return;
-      e.preventDefault();
-      sidebarResizer.classList.add("active");
-      const startX = e.clientX;
-      const startW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w")) || 280;
-      const onMove = (ev: MouseEvent) => {
-        const newW = Math.max(180, Math.min(520, startW + ev.clientX - startX));
-        document.documentElement.style.setProperty("--sidebar-w", newW + "px");
-      };
-      const onUp = () => {
-        sidebarResizer.classList.remove("active");
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-        saveLayout();
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    });
-  }
-
-  // ── Panel resize ────────────────────────────────────────
-  const panelResizer = document.getElementById("panelResizer");
-  if (panelResizer) {
-    panelResizer.addEventListener("mousedown", (e) => {
-      if (bottomPanelCollapsed) return;
-      e.preventDefault();
-      panelResizer.classList.add("active");
-      const startY = e.clientY;
-      const startH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bottom-panel-h")) || 250;
-      const onMove = (ev: MouseEvent) => {
-        const newH = Math.max(80, Math.min(window.innerHeight * 0.65, startH - (ev.clientY - startY)));
-        document.documentElement.style.setProperty("--bottom-panel-h", newH + "px");
-      };
-      const onUp = () => {
-        panelResizer.classList.remove("active");
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-        saveLayout();
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    });
-  }
+  document.getElementById("tryAgainBtn")?.addEventListener("click", () => goToStep(toolHasOptions(activeTool) ? 2 : 1));
+  document.getElementById("startOverBtn")?.addEventListener("click", () => { currentJobId = null; clearFiles(); goToStep(1); });
 
   // ── Compress ────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-cmpr]").forEach(b => { b.onclick = () => { compressLevel = b.dataset.cmpr as any; render(); }; });
@@ -1219,7 +1295,7 @@ function render() {
     const v = validatePageInput(splitPages);
     const h = document.getElementById("pageHint"); if (h) h.innerHTML = renderVH(v);
     pagesEl.className = `input${v?.type==="error"?" invalid":v?.type==="ok"?" valid":""}`;
-    (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
+    syncRunBtn();
   };
 
   // ── PDF2img ─────────────────────────────────────────────
@@ -1230,7 +1306,7 @@ function render() {
     const v = validateDpiInput(imgDpi);
     const h = document.getElementById("dpiHint"); if (h) h.innerHTML = renderVH(v);
     dpiEl.className = `input${v?.type==="error"?" invalid":v?.type==="ok"?" valid":""}`;
-    (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
+    syncRunBtn();
   };
 
   // ── Rotate ──────────────────────────────────────────────
@@ -1242,7 +1318,7 @@ function render() {
     const v = validatePageInput(rotatePages);
     const h = document.getElementById("rotatePagesHint"); if (h) h.innerHTML = renderVH(v);
     rPEl.className = `input${v?.type==="error"?" invalid":v?.type==="ok"?" valid":""}`;
-    (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
+    syncRunBtn();
   };
 
   // ── img2pdf ─────────────────────────────────────────────
@@ -1251,9 +1327,9 @@ function render() {
   // ── Protect ─────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-protmode]").forEach(b => { b.onclick = () => { protectMode = b.dataset.protmode as any; render(); }; });
   const np = document.getElementById("newPwd") as HTMLInputElement | null;
-  if (np) np.oninput = () => { protectNewPassword = np.value; const h = document.getElementById("pwdHint"); if (h) h.innerHTML = renderVH(validateProtectPassword(protectNewPassword, protectConfirmPassword)); (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun(); };
+  if (np) np.oninput = () => { protectNewPassword = np.value; const h = document.getElementById("pwdHint"); if (h) h.innerHTML = renderVH(validateProtectPassword(protectNewPassword, protectConfirmPassword)); syncRunBtn(); };
   const cp = document.getElementById("confirmPwd") as HTMLInputElement | null;
-  if (cp) cp.oninput = () => { protectConfirmPassword = cp.value; const h = document.getElementById("pwdHint"); if (h) h.innerHTML = renderVH(validateProtectPassword(protectNewPassword, protectConfirmPassword)); (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun(); };
+  if (cp) cp.oninput = () => { protectConfirmPassword = cp.value; const h = document.getElementById("pwdHint"); if (h) h.innerHTML = renderVH(validateProtectPassword(protectNewPassword, protectConfirmPassword)); syncRunBtn(); };
 
   // ── Delete pages ────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-deletevis]").forEach(b => {
@@ -1270,12 +1346,12 @@ function render() {
     const v = validatePageInput(deletePagesInput);
     const h = document.getElementById("deletePagesHint"); if (h) h.innerHTML = renderVH(v);
     dpEl.className = `input${v?.type==="error"?" invalid":v?.type==="ok"?" valid":""}`;
-    (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
+    syncRunBtn();
   };
 
   // ── Watermark ───────────────────────────────────────────
   const wmt = document.getElementById("wmText") as HTMLInputElement | null;
-  if (wmt) wmt.oninput = () => { watermarkText = wmt.value; (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun(); };
+  if (wmt) wmt.oninput = () => { watermarkText = wmt.value; syncRunBtn(); };
   const wmo = document.getElementById("wmOpacity") as HTMLInputElement | null;
   if (wmo) wmo.oninput = () => { watermarkOpacity = Number(wmo.value)||30; };
   const wma = document.getElementById("wmAngle") as HTMLInputElement | null;
@@ -1323,7 +1399,7 @@ function render() {
     const v = validateReorderInput(reorderInput);
     const h = document.getElementById("reorderHint"); if (h) h.innerHTML = renderVH(v);
     reEl.className = `input${v?.type==="error"?" invalid":v?.type==="ok"?" valid":""}`;
-    (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
+    syncRunBtn();
   };
 
   // ── Visual page selection (split / deletepages) ─────────
@@ -1357,21 +1433,6 @@ function render() {
     };
   });
 
-  // ── Drop zone ───────────────────────────────────────────
-  const drop = document.getElementById("drop")!;
-  drop.addEventListener("click", () => input.click());
-  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("dragover"); });
-  drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
-  drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("dragover"); if (e.dataTransfer?.files) onFilesChosen(e.dataTransfer.files); });
-
-  // ── Downloads + use as input ────────────────────────────
-  document.querySelectorAll<HTMLButtonElement>("[data-dl]").forEach(b => {
-    b.onclick = () => { const j = jobs.find(j => j.id === b.dataset.dl); if (j?.outputBlob && j.outputName) downloadBlob(j.outputBlob, j.outputName); };
-  });
-  document.querySelectorAll<HTMLButtonElement>("[data-useinput]").forEach(b => {
-    b.onclick = () => useJobAsInput(b.dataset.useinput!);
-  });
-
   // ── File remove + passwords ─────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-rm]").forEach(b => { b.onclick = () => removeFile(Number(b.dataset.rm)); });
   document.querySelectorAll<HTMLInputElement>("[data-pass]").forEach(inp => {
@@ -1393,31 +1454,35 @@ function render() {
   });
 
   // ── Restore scroll positions ────────────────────────────
-  const ws = document.getElementById("toolWorkspace"); if (ws) ws.scrollTop = prevWorkspaceScroll;
-  const pb = document.querySelector<HTMLElement>(".panel-body"); if (pb) pb.scrollTop = prevPanelScroll;
+  const drawer = document.querySelector<HTMLElement>(".drawerBody"); if (drawer) drawer.scrollTop = prevDrawerScroll;
+  window.scrollTo({ top: prevScrollY });
 }
 
 // ─── Keyboard shortcuts (one-time setup) ─────────────────
+let fileInputOpener: (() => void) | null = null;
+
 document.addEventListener("keydown", (e) => {
   const inInput = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as Element)?.tagName ?? "");
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
-    e.preventDefault(); document.getElementById("pick")?.click();
+    if (view === "tool" && currentStep === 1) { e.preventDefault(); fileInputOpener?.(); }
   }
-  if (e.key === "Enter" && !inInput) {
-    const btn = document.getElementById("run") as HTMLButtonElement | null;
+  if (e.key === "Enter" && !inInput && view === "tool") {
+    const btn = (document.getElementById("continueBtn") ?? document.getElementById("run")) as HTMLButtonElement | null;
     if (btn && !btn.disabled) btn.click();
   }
-  if (e.key === "Escape" && !inInput && files.length > 0) clearFiles();
-  if (e.key.toLowerCase() === "t" && !inInput) toggleTheme();
-  if (e.key.toLowerCase() === "b" && !inInput) { sidebarCollapsed = !sidebarCollapsed; saveLayout(); render(); }
-  if ((e.ctrlKey || e.metaKey) && /^[1-9]$/.test(e.key)) {
-    const idx = parseInt(e.key) - 1;
-    if (TOOLS[idx]) { e.preventDefault(); setActiveTool(TOOLS[idx].id); }
+  if (e.key === "Escape" && !inInput) {
+    if (historyOpen) { historyOpen = false; render(); return; }
+    if (view !== "tool") return;
+    if (currentStep === 3) goToStep(toolHasOptions(activeTool) ? 2 : 1);
+    else if (currentStep === 2) goToStep(1);
+    else if (files.length > 0) clearFiles();
+    else goHome();
   }
+  if (e.key.toLowerCase() === "t" && !inInput) toggleTheme();
 });
 
 // ─── Init ────────────────────────────────────────────────
+document.documentElement.lang = getLang();
 restoreFromURLHash();
 loadJobsFromStorage();
-loadLayout();
 render();
