@@ -4,6 +4,11 @@ import type { WorkerEvent, WorkerRequest } from "./worker/messages";
 import type { ThumbEvent } from "./worker/thumb.worker";
 import { buildZip } from "./utils/zip";
 import { t, getLang, setLang, LANGS, type I18nKey } from "./i18n";
+import {
+  initAnalytics, trackPageView, trackToolSelected,
+  trackJobStarted, trackJobCompleted, trackJobError,
+  trackLanguageChange, trackThemeChange,
+} from "./analytics";
 
 type SelectedFile = { file: File; key: string; password: string };
 
@@ -71,6 +76,7 @@ function applyTheme() { document.documentElement.setAttribute("data-theme", curr
 function toggleTheme() {
   currentTheme = currentTheme === "light" ? "dark" : "light";
   localStorage.setItem("pdf-toolkit-theme", currentTheme);
+  trackThemeChange(currentTheme);
   applyTheme(); render();
 }
 applyTheme();
@@ -78,7 +84,9 @@ applyTheme();
 // ─── Language ─────────────────────────────────────────────
 function toggleLang() {
   const idx = LANGS.indexOf(getLang());
-  setLang(LANGS[(idx + 1) % LANGS.length]);
+  const next = LANGS[(idx + 1) % LANGS.length];
+  setLang(next);
+  trackLanguageChange(next);
   render();
 }
 
@@ -286,12 +294,23 @@ function handleEngineMessage(ev: MessageEvent<WorkerEvent>) {
     if (!updated) render();
   } else if (msg.type === "result") {
     const blob = new Blob([msg.outputBytes], { type: msg.mime });
+    const finishedJob = jobs.find(j => j.id === msg.jobId);
+    if (finishedJob) {
+      trackJobCompleted(
+        finishedJob.toolId,
+        finishedJob.inputSize ?? 0,
+        msg.outputBytes.byteLength,
+        Date.now() - finishedJob.createdAt,
+      );
+    }
     jobs = jobs.map(j => j.id === msg.jobId ? { ...j, status: "done", progress: 100, progressNote: undefined, outputName: msg.outputName, outputBlob: blob } : j);
     isJobRunning = false;
     saveJobsToStorage();
     processNextPendingJob();
     render();
   } else if (msg.type === "error") {
+    const failedJob = jobs.find(j => j.id === msg.jobId);
+    if (failedJob) trackJobError(failedJob.toolId, msg.message);
     jobs = jobs.map(j => j.id === msg.jobId ? { ...j, status: "error", progressNote: undefined, error: msg.message } : j);
     isJobRunning = false;
     saveJobsToStorage();
@@ -551,6 +570,8 @@ function setActiveTool(next: ToolId) {
   reorderRotations = {}; reorderSelected = new Set(); reorderDragOverIdx = null; reorderLastSelectedIdx = null;
   visualSelectedPages = []; splitVisualMode = false; deleteVisualMode = false;
   view = "tool"; currentStep = 1; currentJobId = null;
+  trackToolSelected(next, toolTitle(next));
+  trackPageView(`#tool=${next}`, toolTitle(next));
   updateURLHash(); render();
   window.scrollTo({ top: 0 });
 }
@@ -637,6 +658,7 @@ async function runJob() {
   const built = await buildRequest(jobId);
   if (!built) { jobs = jobs.filter(j => j.id !== jobId); currentJobId = null; currentStep = toolHasOptions(activeTool) ? 2 : 1; render(); return; }
 
+  trackJobStarted(activeTool, totalInputSize());
   if (!isJobRunning) {
     isJobRunning = true;
     jobs = jobs.map(j => j.id === jobId ? { ...j, status: "running" } : j);
@@ -1649,4 +1671,6 @@ document.addEventListener("keydown", (e) => {
 document.documentElement.lang = getLang();
 restoreFromURLHash();
 loadJobsFromStorage();
+initAnalytics();
+trackPageView(location.hash || "/", document.title);
 render();

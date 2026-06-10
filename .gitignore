@@ -13,3 +13,7 @@ pnpm-debug.log*
 .idea
 .vscode/*
 !.vscode/extensions.json
+
+# Local env (contains secrets — never commit)
+.env.local
+.env.*.local

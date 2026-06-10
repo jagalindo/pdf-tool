@@ -32,6 +32,7 @@ jobs:
       - name: Build
         env:
           BASE_PATH: "/${{ github.event.repository.name }}/"
+          VITE_GA_ID: ${{ secrets.VITE_GA_ID }}
         run: npm run build
 
       - name: Upload artifact
