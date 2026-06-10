@@ -577,6 +577,85 @@ body{
   transform:translate(-50%,-50%);
   font-size:22px; opacity:.6;
 }
+/* ── Reorder thumb toolbar (hover overlay) ───────────────────── */
+.thumbToolbar{
+  position:absolute; top:0; left:0; right:0;
+  display:flex; justify-content:center; gap:3px;
+  padding:3px 2px;
+  background:linear-gradient(to bottom,rgba(0,0,0,.55) 0%,transparent 100%);
+  opacity:0;
+  transition:opacity .15s ease;
+  z-index:3;
+  pointer-events:none;
+}
+.thumbCard:hover .thumbToolbar{ opacity:1; pointer-events:auto; }
+.thumbToolbarBtn{
+  width:22px; height:22px;
+  border:none; border-radius:5px;
+  background:rgba(255,255,255,.2); color:#fff;
+  cursor:pointer; font-size:13px;
+  display:grid; place-items:center;
+  transition:background .1s;
+  line-height:1; padding:0;
+}
+.thumbToolbarBtn:hover{ background:rgba(255,255,255,.45); }
+
+/* ── Reorder: selected ring ──────────────────────────────────── */
+.thumbCard.selected{
+  border-color:var(--primary) !important;
+  box-shadow:0 0 0 3px rgba(99,102,241,.35) !important;
+}
+
+/* ── Reorder: insert-before indicator ───────────────────────── */
+.insertBefore{
+  width:3px; border-radius:2px;
+  background:var(--primary);
+  align-self:stretch;
+  margin-right:-3px;
+  flex-shrink:0;
+  animation:insertPulse .5s ease-in-out infinite alternate;
+}
+@keyframes insertPulse{
+  from{ opacity:.7; }
+  to{ opacity:1; }
+}
+
+/* ── Reorder batch action bar ────────────────────────────────── */
+.reorderActionBar{
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  margin-top:8px;
+  padding:8px 10px;
+  background:var(--primary-soft);
+  border:1px solid var(--primary-soft-border);
+  border-radius:10px;
+  font-size:12px;
+  color:var(--text);
+}
+.reorderActionBar .actionLabel{
+  font-weight:600; color:var(--primary); margin-right:2px;
+}
+.reorderActionBar .btn{
+  font-size:11px; padding:4px 10px; border-radius:999px;
+}
+
+/* ── Reorder size slider ─────────────────────────────────────── */
+.reorderSizeRow{
+  display:flex; align-items:center; gap:8px;
+  margin-bottom:6px;
+}
+.reorderSizeRow label{ font-size:11px; color:var(--muted); white-space:nowrap; }
+.reorderSizeRow input[type="range"]{
+  flex:1; max-width:120px; accent-color:var(--primary);
+  cursor:pointer;
+}
+
+/* ── Reorder grid: use CSS var for column width ──────────────── */
+.thumbGrid.reorderGrid{
+  grid-template-columns: repeat(auto-fill, minmax(var(--reorder-thumb-size, 120px), 1fr));
+  max-height:480px;
+  align-items:start;
+}
+
 /* Tiny thumbnail in file row */
 .filePrev{
   width:28px; height:40px; border-radius:4px;

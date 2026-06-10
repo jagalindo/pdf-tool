@@ -358,6 +358,11 @@ let cropUnit: "mm" | "pt" = "mm";
 let reorderInput = "";
 let reorderVisualOrder: number[] = [];
 let thumbDragIdx: number | null = null;
+let reorderRotations: Record<number, number> = {};   // pageNum → cumulative degrees
+let reorderSelected: Set<number> = new Set();         // indices in reorderVisualOrder
+let reorderDragOverIdx: number | null = null;
+let reorderThumbSize = 120;
+let reorderLastSelectedIdx: number | null = null;
 // shared visual selection (split + delete)
 let visualSelectedPages: number[] = [];
 
@@ -510,7 +515,7 @@ function onFilesChosen(list: FileList | null) {
     files = Array.from(map.values());
   }
   visualSelectedPages = [];
-  if (activeTool === "reorder" && files.length === 1) { reorderVisualOrder = []; reorderInput = ""; }
+  if (activeTool === "reorder" && files.length === 1) { reorderVisualOrder = []; reorderInput = ""; reorderRotations = {}; reorderSelected = new Set(); reorderDragOverIdx = null; reorderLastSelectedIdx = null; }
   if (activeTool !== "img2pdf") {
     for (const sf of files) requestThumbnails(sf);
   }
@@ -535,6 +540,7 @@ function clearFiles() {
   for (const sf of files) clearThumbs(sf.key);
   files = [];
   reorderVisualOrder = []; reorderInput = "";
+  reorderRotations = {}; reorderSelected = new Set(); reorderDragOverIdx = null; reorderLastSelectedIdx = null;
   visualSelectedPages = [];
   render();
 }
@@ -542,6 +548,7 @@ function clearFiles() {
 function setActiveTool(next: ToolId) {
   activeTool = next; files = [];
   reorderVisualOrder = []; reorderInput = "";
+  reorderRotations = {}; reorderSelected = new Set(); reorderDragOverIdx = null; reorderLastSelectedIdx = null;
   visualSelectedPages = []; splitVisualMode = false; deleteVisualMode = false;
   view = "tool"; currentStep = 1; currentJobId = null;
   updateURLHash(); render();
@@ -553,6 +560,7 @@ function goHome() {
   for (const sf of files) clearThumbs(sf.key);
   files = [];
   reorderVisualOrder = []; reorderInput = "";
+  reorderRotations = {}; reorderSelected = new Set(); reorderDragOverIdx = null; reorderLastSelectedIdx = null;
   visualSelectedPages = []; splitVisualMode = false; deleteVisualMode = false;
   updateURLHash(); render();
   window.scrollTo({ top: 0 });
@@ -673,6 +681,7 @@ function useJobAsInput(jobId: string) {
   for (const sf of files) clearThumbs(sf.key);
   files = [{ file, key, password: "" }];
   reorderVisualOrder = []; reorderInput = "";
+  reorderRotations = {}; reorderSelected = new Set(); reorderDragOverIdx = null; reorderLastSelectedIdx = null;
   visualSelectedPages = []; splitVisualMode = false; deleteVisualMode = false;
   if (view !== "tool") view = "tool";
   currentStep = 1;
@@ -731,19 +740,45 @@ function renderThumbGridReorder(fileKey: string): string {
   if (!total && loading) return `<div class="small" style="margin-top:8px;"><span class="spinner" style="display:inline-block;margin-right:6px;"></span> ${t("thumb.loading")}</div>`;
   if (!total) return "";
 
-  const order = reorderVisualOrder.length === total ? reorderVisualOrder : Array.from({ length: total }, (_, i) => i + 1);
+  const order = reorderVisualOrder.length > 0 ? reorderVisualOrder : Array.from({ length: total }, (_, i) => i + 1);
+
+  const cards = order.map((pageNum, idx) => {
+    const src = pages[pageNum - 1];
+    const rot = reorderRotations[pageNum] ?? 0;
+    const sel = reorderSelected.has(idx);
+    const dragging = thumbDragIdx === idx;
+    const insertBefore = reorderDragOverIdx === idx && thumbDragIdx !== null && thumbDragIdx !== idx;
+    return `${insertBefore ? `<div class="insertBefore"></div>` : ""}` +
+      `<div class="thumbCard${dragging ? " dragging" : ""}${sel ? " selected" : ""}" data-thumbidx="${idx}" draggable="true" tabindex="0">
+        <div class="thumbToolbar">
+          <button class="thumbToolbarBtn" data-rot-left="${idx}" title="${t("reorder.rotateLeft")}">↺</button>
+          <button class="thumbToolbarBtn" data-rot-right="${idx}" title="${t("reorder.rotateRight")}">↻</button>
+          <button class="thumbToolbarBtn" data-del-page="${idx}" title="${t("reorder.delete")}">🗑</button>
+        </div>
+        ${src ? `<img class="thumbImg" src="${src}" style="${rot ? `transform:rotate(${rot}deg)` : ""}" />` : `<div class="thumbSkeleton"></div>`}
+        <div class="thumbNum">${pageNum}</div>
+      </div>`;
+  }).join("");
+
+  const actionBar = reorderSelected.size > 0 ? `
+    <div class="reorderActionBar">
+      <span class="actionLabel">${t("reorder.selected", reorderSelected.size)}</span>
+      <button class="btn" data-batch-rot-left="1">↺ ${t("reorder.rotateLeft")}</button>
+      <button class="btn" data-batch-rot-right="1">↻ ${t("reorder.rotateRight")}</button>
+      <button class="btn danger" data-batch-delete="1">🗑 ${t("reorder.deleteSelected")}</button>
+      <button class="btn" data-batch-deselect="1">${t("reorder.deselectAll")}</button>
+    </div>` : "";
 
   return `
+    <div class="reorderSizeRow">
+      <label for="reorderSizeSlider">${t("reorder.thumbSize")}</label>
+      <input type="range" id="reorderSizeSlider" min="80" max="220" step="20" value="${reorderThumbSize}" title="${t("reorder.sizeSlider")}" />
+    </div>
     <div class="small" style="margin-bottom:4px;">${t("thumb.dragReorder")}</div>
-    <div class="thumbGrid" id="thumbGridReorder">
-      ${order.map((pageNum, idx) => {
-        const src = pages[pageNum - 1];
-        return `<div class="thumbCard${thumbDragIdx === idx ? " dragging" : ""}" data-thumbidx="${idx}" draggable="true">
-          ${src ? `<img class="thumbImg" src="${src}" />` : `<div class="thumbSkeleton"></div>`}
-          <div class="thumbNum">${pageNum}</div>
-        </div>`;
-      }).join("")}
-    </div>`;
+    <div class="thumbGrid reorderGrid" id="thumbGridReorder" style="--reorder-thumb-size:${reorderThumbSize}px;">
+      ${cards}
+    </div>
+    ${actionBar}`;
 }
 
 function renderThumbGridSelect(fileKey: string, selected: number[]): string {
@@ -1415,22 +1450,151 @@ function render() {
     };
   });
 
-  // ── Reorder thumbnail drag ──────────────────────────────
+  // ── Reorder thumbnail drag + interactions ───────────────
+  const thumbGridEl = document.getElementById("thumbGridReorder");
+
+  // Size slider — no full render needed
+  const sizeSlider = document.getElementById("reorderSizeSlider") as HTMLInputElement | null;
+  if (sizeSlider) {
+    sizeSlider.oninput = () => {
+      reorderThumbSize = Number(sizeSlider.value);
+      if (thumbGridEl) (thumbGridEl as HTMLElement).style.setProperty("--reorder-thumb-size", `${reorderThumbSize}px`);
+    };
+  }
+
+  // Click grid background to deselect all
+  if (thumbGridEl) {
+    thumbGridEl.addEventListener("click", (e) => {
+      if ((e.target as Element).closest(".thumbCard")) return;
+      reorderSelected = new Set();
+      render();
+    });
+  }
+
   const thumbCards = document.querySelectorAll<HTMLDivElement>(".thumbCard[data-thumbidx]");
+
+  // Helper: delete page by visual index
+  function deleteReorderPage(idx: number) {
+    reorderVisualOrder = reorderVisualOrder.filter((_, i) => i !== idx);
+    reorderInput = reorderVisualOrder.join(",");
+    // Fix selected indices — remove idx, shift down those above
+    const newSel = new Set<number>();
+    reorderSelected.forEach(i => { if (i < idx) newSel.add(i); else if (i > idx) newSel.add(i - 1); });
+    reorderSelected = newSel;
+    if (reorderLastSelectedIdx !== null) {
+      if (reorderLastSelectedIdx === idx) reorderLastSelectedIdx = null;
+      else if (reorderLastSelectedIdx > idx) reorderLastSelectedIdx--;
+    }
+    render();
+  }
+
+  // Helper: rotate page by visual index
+  function rotateReorderPage(idx: number, delta: number) {
+    const pageNum = reorderVisualOrder[idx];
+    if (pageNum === undefined) return;
+    const cur = reorderRotations[pageNum] ?? 0;
+    reorderRotations[pageNum] = ((cur + delta) % 360 + 360) % 360;
+    // Update img transform directly without full re-render
+    const card = document.querySelector<HTMLDivElement>(`.thumbCard[data-thumbidx="${idx}"]`);
+    const img = card?.querySelector<HTMLImageElement>(".thumbImg");
+    if (img) img.style.transform = reorderRotations[pageNum] ? `rotate(${reorderRotations[pageNum]}deg)` : "";
+  }
+
   thumbCards.forEach(card => {
     const idx = Number(card.dataset.thumbidx);
+
+    // Drag
     card.ondragstart = (e) => { thumbDragIdx = idx; card.classList.add("dragging"); if (e.dataTransfer) e.dataTransfer.effectAllowed = "move"; };
-    card.ondragend = () => { thumbDragIdx = null; card.classList.remove("dragging"); thumbCards.forEach(c => c.classList.remove("dropTarget")); };
-    card.ondragover = (e) => { if (thumbDragIdx === null || thumbDragIdx === idx) return; e.preventDefault(); card.classList.add("dropTarget"); };
-    card.ondragleave = () => card.classList.remove("dropTarget");
+    card.ondragend = () => {
+      thumbDragIdx = null; reorderDragOverIdx = null;
+      card.classList.remove("dragging");
+      render();
+    };
+    card.ondragover = (e) => {
+      if (thumbDragIdx === null || thumbDragIdx === idx) return;
+      e.preventDefault();
+      if (reorderDragOverIdx !== idx) { reorderDragOverIdx = idx; render(); }
+    };
+    card.ondragleave = (e) => {
+      if (!card.contains(e.relatedTarget as Node)) {
+        if (reorderDragOverIdx === idx) { reorderDragOverIdx = null; render(); }
+      }
+    };
     card.ondrop = (e) => {
-      e.preventDefault(); card.classList.remove("dropTarget");
-      const from = thumbDragIdx; thumbDragIdx = null;
-      if (from === null || from === idx) return;
+      e.preventDefault();
+      const from = thumbDragIdx; thumbDragIdx = null; reorderDragOverIdx = null;
+      if (from === null || from === idx) { render(); return; }
       const o = [...reorderVisualOrder]; const [m] = o.splice(from, 1); o.splice(idx, 0, m);
       reorderVisualOrder = o; reorderInput = o.join(",");
       render();
     };
+
+    // Click to select (not on toolbar buttons)
+    card.addEventListener("click", (e) => {
+      if ((e.target as Element).closest(".thumbToolbarBtn")) return;
+      if ((e as MouseEvent).shiftKey && reorderLastSelectedIdx !== null) {
+        const lo = Math.min(reorderLastSelectedIdx, idx);
+        const hi = Math.max(reorderLastSelectedIdx, idx);
+        for (let i = lo; i <= hi; i++) reorderSelected.add(i);
+      } else {
+        if (reorderSelected.has(idx)) reorderSelected.delete(idx);
+        else reorderSelected.add(idx);
+        reorderLastSelectedIdx = idx;
+      }
+      render();
+    });
+
+    // Keyboard navigation
+    card.addEventListener("keydown", (e) => {
+      const allCards = Array.from(document.querySelectorAll<HTMLDivElement>(".thumbCard[data-thumbidx]"));
+      const gridStyle = thumbGridEl ? getComputedStyle(thumbGridEl) : null;
+      const cols = gridStyle ? Math.round(thumbGridEl!.clientWidth / (reorderThumbSize + 8)) : 1;
+      const curIdx = Number(card.dataset.thumbidx);
+      if (e.key === "ArrowRight") { const next = allCards.find(c => Number(c.dataset.thumbidx) === curIdx + 1); next?.focus(); e.preventDefault(); }
+      else if (e.key === "ArrowLeft") { const prev = allCards.find(c => Number(c.dataset.thumbidx) === curIdx - 1); prev?.focus(); e.preventDefault(); }
+      else if (e.key === "ArrowDown") { const below = allCards.find(c => Number(c.dataset.thumbidx) === curIdx + cols); below?.focus(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { const above = allCards.find(c => Number(c.dataset.thumbidx) === curIdx - cols); above?.focus(); e.preventDefault(); }
+      else if (e.key === "Delete" || e.key === "Backspace") { deleteReorderPage(curIdx); }
+      else if (e.key === "r") { rotateReorderPage(curIdx, 90); }
+      else if (e.key === "l") { rotateReorderPage(curIdx, -90); }
+      else if (e.key === " ") { e.preventDefault(); if (reorderSelected.has(curIdx)) reorderSelected.delete(curIdx); else reorderSelected.add(curIdx); reorderLastSelectedIdx = curIdx; render(); }
+    });
+  });
+
+  // Hover toolbar buttons
+  document.querySelectorAll<HTMLButtonElement>("[data-rot-left]").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); rotateReorderPage(Number(btn.dataset.rotLeft), -90); };
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-rot-right]").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); rotateReorderPage(Number(btn.dataset.rotRight), 90); };
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-del-page]").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); deleteReorderPage(Number(btn.dataset.delPage)); };
+  });
+
+  // Batch action bar
+  document.querySelector<HTMLButtonElement>("[data-batch-rot-left]")?.addEventListener("click", () => {
+    reorderSelected.forEach(idx => rotateReorderPage(idx, -90));
+    // batch rotation updated img transforms directly in rotateReorderPage; but we need a render since cards may not exist
+    render();
+  });
+  document.querySelector<HTMLButtonElement>("[data-batch-rot-right]")?.addEventListener("click", () => {
+    reorderSelected.forEach(idx => rotateReorderPage(idx, 90));
+    render();
+  });
+  document.querySelector<HTMLButtonElement>("[data-batch-delete]")?.addEventListener("click", () => {
+    const indices = Array.from(reorderSelected).sort((a, b) => b - a); // delete from end
+    indices.forEach(idx => {
+      reorderVisualOrder = reorderVisualOrder.filter((_, i) => i !== idx);
+    });
+    reorderInput = reorderVisualOrder.join(",");
+    reorderSelected = new Set();
+    reorderLastSelectedIdx = null;
+    render();
+  });
+  document.querySelector<HTMLButtonElement>("[data-batch-deselect]")?.addEventListener("click", () => {
+    reorderSelected = new Set();
+    render();
   });
 
   // ── File remove + passwords ─────────────────────────────
