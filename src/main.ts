@@ -30,6 +30,13 @@ const TOOL_ICONS: Record<string, string> = {
   extracttext:"📝", crop:"✂", reorder:"↕️",
 };
 
+const TOOL_GROUPS: { name: string; tools: ToolId[] }[] = [
+  { name: "Organizar", tools: ["merge", "split", "reorder", "deletepages", "rotate"] },
+  { name: "Convertir", tools: ["pdf2img", "img2pdf", "extracttext"] },
+  { name: "Mejorar",   tools: ["watermark", "pagenumbers", "metadata", "crop"] },
+  { name: "Seguridad", tools: ["protect", "compress"] },
+];
+
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 // ─── Theme ────────────────────────────────────────────────
@@ -107,8 +114,8 @@ const thumbWorker = new Worker(new URL("./worker/thumb.worker.ts", import.meta.u
 thumbWorker.onmessage = handleThumbMessage;
 
 // ─── Thumbnail state ──────────────────────────────────────
-const thumbPages: Record<string, string[]> = {};  // fileKey → jpeg data URLs (0-indexed)
-const thumbTotal: Record<string, number> = {};     // fileKey → page count
+const thumbPages: Record<string, string[]> = {};
+const thumbTotal: Record<string, number> = {};
 const thumbLoading = new Set<string>();
 const thumbFailed = new Set<string>();
 
@@ -135,7 +142,6 @@ function handleThumbMessage(ev: MessageEvent<ThumbEvent>) {
     if (!thumbPages[msg.fileKey]) thumbPages[msg.fileKey] = [];
     thumbPages[msg.fileKey][msg.index] = jpegBufToDataUrl(msg.jpeg);
     thumbTotal[msg.fileKey] = msg.total;
-    // Init reorder visual order on first page
     if (activeTool === "reorder" && files.length === 1 && files[0].key === msg.fileKey && reorderVisualOrder.length === 0) {
       reorderVisualOrder = Array.from({ length: msg.total }, (_, i) => i + 1);
       reorderInput = reorderVisualOrder.join(",");
@@ -307,6 +313,11 @@ let thumbDragIdx: number | null = null;
 // shared visual selection (split + delete)
 let visualSelectedPages: number[] = [];
 
+// IDE panel state
+let bottomPanelCollapsed = false;
+let sidebarCollapsed = false;
+const collapsedGroups = new Set<string>();
+
 // ─── Page parsing ─────────────────────────────────────────
 function parsePageList(input: string): number[] {
   const out: number[] = [];
@@ -384,7 +395,7 @@ function validateFiles(): VR {
 }
 
 function canRun(): boolean {
-  if (isJobRunning && pendingJobs.length >= 5) return false; // max 5 queued
+  if (isJobRunning && pendingJobs.length >= 5) return false;
   if (files.length === 0) return false;
   if (files.some(f => f.file.size === 0 || f.file.size > MAX_FILE_SIZE)) return false;
   if (activeTool === "merge" && (files.length < 2 || files.length > MAX_MERGE_FILES)) return false;
@@ -437,10 +448,8 @@ function onFilesChosen(list: FileList | null) {
   } else {
     files = Array.from(map.values());
   }
-  // Reset visual state for page-related tools
   visualSelectedPages = [];
   if (activeTool === "reorder" && files.length === 1) { reorderVisualOrder = []; reorderInput = ""; }
-  // Request thumbnails for PDF files
   if (activeTool !== "img2pdf") {
     for (const sf of files) requestThumbnails(sf);
   }
@@ -534,6 +543,8 @@ async function runJob() {
   const tool = TOOLS.find(t => t.id === activeTool)!;
   const job: Job = { id: jobId, toolId: activeTool, toolTitle: tool.title, createdAt: Date.now(), status: "queued", progress: 0, inputCount: files.length, inputSize: totalInputSize() };
   jobs = [job, ...jobs];
+  // Auto-expand bottom panel when a job starts
+  bottomPanelCollapsed = false;
   render();
 
   const built = await buildRequest(jobId);
@@ -586,7 +597,7 @@ function useJobAsInput(jobId: string) {
   visualSelectedPages = []; splitVisualMode = false; deleteVisualMode = false;
   requestThumbnails(files[0]);
   render();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  document.getElementById("toolWorkspace")?.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 // ─── Tool list ────────────────────────────────────────────
@@ -596,21 +607,48 @@ function getFilteredTools() {
   return TOOLS.filter(t => t.title.toLowerCase().includes(q) || t.subtitle.toLowerCase().includes(q) || t.tags.some(x => x.toLowerCase().includes(q)));
 }
 
+function renderToolBtn(t: ToolDef): string {
+  return `<button class="toolBtn${t.id === activeTool ? " active" : ""}" data-tool="${t.id}">
+    <div class="toolBtnHeader">
+      <span class="toolBtnIcon">${TOOL_ICONS[t.id] ?? "📄"}</span>
+      <span class="toolBtnName">${t.title}</span>
+    </div>
+    <div class="p" style="padding-left:34px;">${t.subtitle}</div>
+    <div class="badges" style="padding-left:34px;">${t.tags.map(x => `<span class="badge">${x}</span>`).join("")}</div>
+  </button>`;
+}
+
 function renderToolsList(filtered: ToolDef[]): string {
   if (!filtered.length) return `<div class="small" style="padding:10px;">No se encontraron herramientas.</div>`;
-  return filtered.map(t => `
-    <button class="toolBtn${t.id === activeTool ? " active" : ""}" data-tool="${t.id}">
-      <div class="toolBtnHeader">
-        <span class="toolBtnIcon">${TOOL_ICONS[t.id] ?? "📄"}</span>
-        <span class="toolBtnName">${t.title}</span>
-      </div>
-      <div class="p" style="padding-left:36px;">${t.subtitle}</div>
-      <div class="badges" style="padding-left:36px;">${t.tags.map(x => `<span class="badge">${x}</span>`).join("")}</div>
-    </button>`).join("");
+  if (searchQuery.trim()) return filtered.map(renderToolBtn).join("");
+  return TOOL_GROUPS.map(g => {
+    const gTools = g.tools.map(id => TOOLS.find(t => t.id === id)!).filter(Boolean);
+    const collapsed = collapsedGroups.has(g.name);
+    return `<div class="tool-group">
+      <button class="tool-group-header" data-group="${escapeAttr(g.name)}">
+        <span class="tool-group-arrow${collapsed ? " collapsed" : ""}">▾</span>
+        <span class="tool-group-name">${g.name.toUpperCase()}</span>
+        <span class="tool-group-count">${gTools.length}</span>
+      </button>
+      ${collapsed ? "" : `<div class="tool-group-items">${gTools.map(renderToolBtn).join("")}</div>`}
+    </div>`;
+  }).join("");
 }
 
 function bindToolButtons(c: HTMLElement) {
-  c.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(b => { b.onclick = () => setActiveTool(b.dataset.tool as ToolId); });
+  c.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(b => {
+    b.onclick = () => setActiveTool(b.dataset.tool as ToolId);
+  });
+  c.querySelectorAll<HTMLButtonElement>("[data-group]").forEach(b => {
+    b.onclick = () => {
+      const name = b.dataset.group!;
+      if (collapsedGroups.has(name)) collapsedGroups.delete(name);
+      else collapsedGroups.add(name);
+      const c2 = document.getElementById("tools")!;
+      c2.innerHTML = renderToolsList(getFilteredTools());
+      bindToolButtons(c2);
+    };
+  });
 }
 
 // ─── Thumbnail grid rendering ─────────────────────────────
@@ -838,6 +876,10 @@ function renderOptions(): string {
 
 // ─── Main render ──────────────────────────────────────────
 function render() {
+  // Preserve scroll positions across re-renders
+  const prevWorkspaceScroll = document.getElementById("toolWorkspace")?.scrollTop ?? 0;
+  const prevPanelScroll = document.querySelector<HTMLElement>(".panel-body")?.scrollTop ?? 0;
+
   updateURLHash();
   const tool = TOOLS.find(t => t.id === activeTool)!;
   const filtered = getFilteredTools();
@@ -851,47 +893,65 @@ function render() {
 
   app.innerHTML = `
     <div class="topbar">
-      <div class="container row">
+      <div class="topbar-inner">
         <div class="brand">
           <div class="logo">📄</div>
           <div>
             <div class="h1">PDF Toolkit</div>
-            <div class="p">100% local • Sin subida de archivos</div>
+            <div class="p">100% local · Sin subida</div>
           </div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;width:420px;max-width:50vw;">
-          <input id="search" class="input" placeholder="Buscar herramientas…" value="${escapeAttr(searchQuery)}" />
+        <div style="display:flex;gap:8px;align-items:center;">
           ${deferredInstallPrompt ? `<button id="installBtn" title="Instalar como app">⬇ Instalar</button>` : ""}
           <button class="themeBtn" id="themeToggle" title="Cambiar tema (T)">${themeIcon}</button>
         </div>
       </div>
     </div>
 
-    <div class="container grid">
-      <div class="card">
-        <div class="cardHeader"><div class="h1">Herramientas</div></div>
-        <div class="tools" id="tools"></div>
-      </div>
+    <div class="ide-body">
 
-      <div style="display:flex;flex-direction:column;gap:16px;">
-        <div class="card">
-          <div class="cardBody">
-            <div class="row">
-              <div>
-                <div class="h2">${tool.title}</div>
-                <div class="p">${tool.subtitle}</div>
-                <div class="badges">
-                  ${tool.tags.map(t => `<span class="badge">${t}</span>`).join("")}
-                  <span class="badge primary">Modo privado</span>
-                </div>
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-                <button class="btn" id="pick">Subir</button>
-                <button class="btn" id="clear" ${files.length?"":"disabled"}>Limpiar</button>
-                ${hasRunning ? `<button class="btn danger" id="cancel">✕ Cancelar${pendingJobs.length>0?" ("+((pendingJobs.length+1))+")":""}</button>` : ""}
-                <button class="btn primary" id="run" ${runOk?"":"disabled"}>
-                  ${isJobRunning?"Procesando…":pendingJobs.length>0?`En cola (${pendingJobs.length+1})…`:"Ejecutar"}
-                </button>
+      <aside class="sidebar${sidebarCollapsed ? " collapsed" : ""}" id="sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">Herramientas</span>
+          <button class="icon-btn" data-action="toggleSidebar" title="Colapsar barra lateral">◀</button>
+        </div>
+        <div class="sidebar-search">
+          <input id="search" class="input" placeholder="Buscar herramientas…" value="${escapeAttr(searchQuery)}" style="font-size:12px;padding:7px 10px;" />
+        </div>
+        <div class="sidebar-tools tools" id="tools"></div>
+      </aside>
+
+      <div class="sidebar-resizer" id="sidebarResizer"></div>
+
+      <div class="main-col">
+
+        <div class="tool-workspace" id="toolWorkspace">
+
+          <div class="workspace-header">
+            <div class="breadcrumb">
+              ${sidebarCollapsed ? `<button class="icon-btn" data-action="toggleSidebar" title="Mostrar barra lateral" style="margin-right:4px;">☰</button>` : ""}
+              <span class="breadcrumb-root">PDF Toolkit</span>
+              <span class="breadcrumb-sep">›</span>
+              <span class="breadcrumb-active">${TOOL_ICONS[activeTool] ?? "📄"} ${tool.title}</span>
+            </div>
+            <div class="workspace-actions">
+              <button class="btn" id="pick">Subir</button>
+              <button class="btn" id="clear" ${files.length ? "" : "disabled"}>Limpiar</button>
+              ${hasRunning ? `<button class="btn danger" id="cancel">✕ Cancelar${pendingJobs.length > 0 ? " (" + (pendingJobs.length + 1) + ")" : ""}</button>` : ""}
+              <button class="btn primary" id="run" ${runOk ? "" : "disabled"}>
+                ${isJobRunning ? "Procesando…" : pendingJobs.length > 0 ? `En cola (${pendingJobs.length + 1})…` : "Ejecutar"}
+              </button>
+            </div>
+          </div>
+
+          <div class="workspace-inner">
+
+            <div class="tool-intro">
+              <div class="h2">${tool.title}</div>
+              <div class="p">${tool.subtitle}</div>
+              <div class="badges" style="margin-top:8px;">
+                ${tool.tags.map(t => `<span class="badge">${t}</span>`).join("")}
+                <span class="badge primary">Modo privado</span>
               </div>
             </div>
 
@@ -899,103 +959,129 @@ function render() {
 
             <div class="drop" id="drop">
               <div class="dropIcon">⬆</div>
-              <div class="dropTitle">${isImg?"Arrastra imágenes aquí":"Arrastra PDFs aquí"}</div>
-              <div class="small">${isImg?"JPG y PNG admitidos":"o haz clic en <strong>Subir</strong>"}</div>
+              <div class="dropTitle">${isImg ? "Arrastra imágenes aquí" : "Arrastra PDFs aquí"}</div>
+              <div class="small">${isImg ? "JPG y PNG admitidos" : "o haz clic en <strong>Subir</strong>"}</div>
             </div>
 
             <div class="files" id="files">
               ${isMulti && files.length > 1 ? `<div class="small" style="margin-bottom:2px;">Arrastra los nombres para reordenar.</div>` : ""}
-              ${files.length===0 ? `<div class="small">Sin archivos seleccionados.</div>` : files.map((f, idx) => {
-                const th0 = thumbPages[f.key]?.[0];
-                const tl = thumbLoading.has(f.key);
-                const tf = thumbFailed.has(f.key);
-                const tc = thumbTotal[f.key];
-                return `<div class="fileRow" data-idx="${idx}">
-                  ${isMulti && files.length>1 ? `<div class="dragHandle" title="Reordenar" aria-hidden="true">↕</div>` : ""}
-                  ${!isImg ? (th0 ? `<img class="filePrev" src="${th0}" alt="p1" />` : tl ? `<div class="filePrevSkeleton"></div>` : tf ? `<div class="icon">🔒</div>` : `<div class="icon">📄</div>`) : `<div class="icon">🖼️</div>`}
-                  <div class="fileInfo">
-                    <div class="fileName">${escapeAttr(f.file.name)}</div>
-                    <div class="fileMeta">${prettyBytes(f.file.size)}${tc ? ` • <span class="pgCount">${tc} pág.</span>` : tl ? ` • <span class="pgCount">…</span>` : ""}</div>
-                  </div>
-                  ${!isImg ? `<div class="filePassword">
-                    <input class="input" data-pass="${idx}" value="${escapeAttr(f.password??"")} " placeholder="Contraseña (si protegido)" autocomplete="off" />
-                    <div class="small">Solo en tu navegador.</div>
-                  </div>` : ""}
-                  <button class="btn" data-rm="${idx}">Quitar</button>
-                </div>`;
-              }).join("")}
+              ${files.length === 0
+                ? `<div class="small">Sin archivos seleccionados.</div>`
+                : files.map((f, idx) => {
+                    const th0 = thumbPages[f.key]?.[0];
+                    const tl = thumbLoading.has(f.key);
+                    const tf = thumbFailed.has(f.key);
+                    const tc = thumbTotal[f.key];
+                    return `<div class="fileRow" data-idx="${idx}">
+                      ${isMulti && files.length > 1 ? `<div class="dragHandle" title="Reordenar" aria-hidden="true">↕</div>` : ""}
+                      ${!isImg ? (th0 ? `<img class="filePrev" src="${th0}" alt="p1" />` : tl ? `<div class="filePrevSkeleton"></div>` : tf ? `<div class="icon">🔒</div>` : `<div class="icon">📄</div>`) : `<div class="icon">🖼️</div>`}
+                      <div class="fileInfo">
+                        <div class="fileName">${escapeAttr(f.file.name)}</div>
+                        <div class="fileMeta">${prettyBytes(f.file.size)}${tc ? ` • <span class="pgCount">${tc} pág.</span>` : tl ? ` • <span class="pgCount">…</span>` : ""}</div>
+                      </div>
+                      ${!isImg ? `<div class="filePassword">
+                        <input class="input" data-pass="${idx}" value="${escapeAttr(f.password ?? "")}" placeholder="Contraseña (si protegido)" autocomplete="off" />
+                        <div class="small">Solo en tu navegador.</div>
+                      </div>` : ""}
+                      <button class="btn" data-rm="${idx}">Quitar</button>
+                    </div>`;
+                  }).join("")}
               ${renderVH(fileVal)}
             </div>
 
             <div class="split"></div>
 
-            <div class="card" style="box-shadow:none;">
-              <div class="cardBody" style="padding:0;">
-                <div class="h1">Opciones</div>
-                <div class="p">Todo se procesa en un Web Worker (sin subida a servidores).</div>
-                <div style="margin-top:12px;">${renderOptions()}</div>
-              </div>
+            <div>
+              <div class="h1">Opciones</div>
+              <div class="p">Procesado en un Web Worker — sin subida de datos.</div>
+              <div style="margin-top:12px;">${renderOptions()}</div>
             </div>
+
+            <div class="small" style="margin-top:24px;text-align:center;opacity:.5;">
+              Atajos: Ctrl+O abrir · Enter ejecutar · Esc limpiar · Ctrl+1–9 herramienta · T tema
+            </div>
+
           </div>
         </div>
 
-        <div class="card">
-          <div class="cardHeader">
-            <div class="row">
-              <div class="h1">Historial</div>
-              <div style="display:flex;gap:8px;">
-                ${completedJobs.length>1 ? `<button class="btn" id="dlAll">⬇ Descargar todos (${completedJobs.length})</button>` : ""}
-                <button class="btn" id="clearJobs" ${jobs.length?"":"disabled"}>Limpiar</button>
-              </div>
+        <div class="panel-resizer" id="panelResizer"></div>
+
+        <div class="bottom-panel${bottomPanelCollapsed ? " collapsed" : ""}" id="bottomPanel">
+          <div class="panel-tabbar">
+            <button class="panel-tab active" id="toggleBottomPanel">
+              HISTORIAL
+              ${hasRunning ? `<span class="spinner" style="width:10px;height:10px;border-width:2px;margin-left:4px;"></span>` : ""}
+              ${jobs.length ? `<span class="panel-badge">${jobs.length}</span>` : ""}
+            </button>
+            <div class="panel-actions">
+              ${completedJobs.length > 1 ? `<button class="btn" style="font-size:11px;padding:4px 10px;" id="dlAll">⬇ Todos (${completedJobs.length})</button>` : ""}
+              <button class="btn" style="font-size:11px;padding:4px 10px;" id="clearJobs" ${jobs.length ? "" : "disabled"}>Limpiar</button>
+              <button class="icon-btn" id="collapsePanel" title="${bottomPanelCollapsed ? "Expandir panel" : "Colapsar panel"}">${bottomPanelCollapsed ? "▲" : "▼"}</button>
             </div>
           </div>
-          <div class="cardBody">
+          <div class="panel-body">
             <div class="jobs">
-              ${jobs.length===0 ? `<div class="small">Sin trabajos aún.</div>` : jobs.map(j => {
-                const outSz = j.outputBlob?.size;
-                const sizeInfo = j.inputSize ? `Entrada: ${prettyBytes(j.inputSize)}` : "";
-                const outInfo = outSz ? ` → Salida: ${prettyBytes(outSz)}` : "";
-                const red = (j.inputSize && outSz && j.toolId==="compress" && outSz<j.inputSize) ? ` (↓${Math.round((1-outSz/j.inputSize)*100)}%)` : "";
-                const canUse = j.status==="done" && j.outputBlob && j.outputName?.endsWith(".pdf");
-                return `<div class="jobRow ${j.status}">
-                  <div class="row">
-                    <div style="min-width:0">
-                      <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${j.toolTitle}</div>
-                      <div class="kv">${new Date(j.createdAt).toLocaleString()} • ${j.inputCount} archivo(s)</div>
-                      ${sizeInfo?`<div class="jobSize">${sizeInfo}${outInfo}${red?`<span class="reduction">${red}</span>`:""}</div>`:""}
-                    </div>
-                    <div>${j.status==="running"?`<span class="spinner"></span>`:`<span class="badge${j.status==="done"?" primary":j.status==="error"?" error":""}">${j.status==="queued"?"En cola":j.status==="done"?"Completado":"Error"}</span>`}</div>
-                  </div>
-                  <div style="margin-top:10px;">
-                    <div class="progressBar"><div class="progressFill${j.status==="running"?" running":""}" style="width:${j.progress}%"></div></div>
-                    <div class="kv" style="margin-top:6px;">${j.progress}%${j.progressNote?` – ${escapeAttr(j.progressNote)}`:""}</div>
-                  </div>
-                  ${j.error?`<div class="err">${escapeAttr(j.error)}</div>`:""}
-                  ${j.status==="done"&&j.outputBlob&&j.outputName?`
-                    <div class="successMsg">Proceso completado exitosamente.</div>
-                    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                      <button class="btn primary" data-dl="${j.id}">⬇ ${escapeAttr(j.outputName)}</button>
-                      ${canUse?`<button class="btn" data-useinput="${j.id}">Usar como entrada</button>`:""}
-                    </div>`:""}
-                </div>`;
-              }).join("")}
+              ${jobs.length === 0
+                ? `<div class="small">Sin trabajos aún.</div>`
+                : jobs.map(j => {
+                    const outSz = j.outputBlob?.size;
+                    const sizeInfo = j.inputSize ? `Entrada: ${prettyBytes(j.inputSize)}` : "";
+                    const outInfo = outSz ? ` → Salida: ${prettyBytes(outSz)}` : "";
+                    const red = (j.inputSize && outSz && j.toolId === "compress" && outSz < j.inputSize)
+                      ? ` (↓${Math.round((1 - outSz / j.inputSize) * 100)}%)` : "";
+                    const canUse = j.status === "done" && j.outputBlob && j.outputName?.endsWith(".pdf");
+                    return `<div class="jobRow ${j.status}">
+                      <div class="row">
+                        <div style="min-width:0">
+                          <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${j.toolTitle}</div>
+                          <div class="kv">${new Date(j.createdAt).toLocaleString()} • ${j.inputCount} archivo(s)</div>
+                          ${sizeInfo ? `<div class="jobSize">${sizeInfo}${outInfo}${red ? `<span class="reduction">${red}</span>` : ""}</div>` : ""}
+                        </div>
+                        <div>${j.status === "running"
+                          ? `<span class="spinner"></span>`
+                          : `<span class="badge${j.status === "done" ? " primary" : j.status === "error" ? " error" : ""}">${j.status === "queued" ? "En cola" : j.status === "done" ? "Completado" : "Error"}</span>`}
+                        </div>
+                      </div>
+                      <div style="margin-top:10px;">
+                        <div class="progressBar"><div class="progressFill${j.status === "running" ? " running" : ""}" style="width:${j.progress}%"></div></div>
+                        <div class="kv" style="margin-top:6px;">${j.progress}%${j.progressNote ? ` – ${escapeAttr(j.progressNote)}` : ""}</div>
+                      </div>
+                      ${j.error ? `<div class="err">${escapeAttr(j.error)}</div>` : ""}
+                      ${j.status === "done" && j.outputBlob && j.outputName ? `
+                        <div class="successMsg">Proceso completado exitosamente.</div>
+                        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                          <button class="btn primary" data-dl="${j.id}">⬇ ${escapeAttr(j.outputName)}</button>
+                          ${canUse ? `<button class="btn" data-useinput="${j.id}">Usar como entrada</button>` : ""}
+                        </div>` : ""}
+                    </div>`;
+                  }).join("")}
             </div>
           </div>
         </div>
 
-        <div class="small" style="text-align:center;">
-          Todos los archivos se procesan localmente en tu navegador. Nada se sube a ningún servidor.
-          <br><span style="opacity:.5;">Atajos: Ctrl+O abrir · Enter ejecutar · Esc limpiar · Ctrl+1–9 herramienta</span>
-        </div>
+      </div>
+    </div>
+
+    <div class="statusbar">
+      <button class="status-btn" data-action="toggleSidebar" title="Alternar barra lateral (B)">
+        ${sidebarCollapsed ? "☰" : "⊟"}
+      </button>
+      <span class="status-sep">│</span>
+      <span class="status-item">${TOOL_ICONS[activeTool] ?? "📄"} ${tool.title}</span>
+      ${files.length > 0 ? `<span class="status-sep">│</span><span class="status-item">📁 ${files.length} archivo(s)${files.length === 1 ? " · " + prettyBytes(totalInputSize()) : ""}</span>` : ""}
+      ${isJobRunning ? `<span class="status-sep">│</span><span class="status-item"><span class="spinner-tiny"></span> Procesando…</span>` : ""}
+      ${pendingJobs.length > 0 ? `<span class="status-sep">│</span><span class="status-item">En cola: ${pendingJobs.length}</span>` : ""}
+      <div class="status-right">
+        <span class="status-item">🔒 100% local</span>
       </div>
     </div>`;
 
-  // Tools list
+  // ── Inject tools list ──────────────────────────────────
   const toolsEl = document.getElementById("tools")!;
   toolsEl.innerHTML = renderToolsList(filtered);
   bindToolButtons(toolsEl);
 
-  // File input
+  // ── File input ─────────────────────────────────────────
   const input = document.createElement("input");
   input.type = "file";
   input.accept = isImg ? "image/jpeg,image/png,.jpg,.jpeg,.png" : "application/pdf,.pdf";
@@ -1011,31 +1097,83 @@ function render() {
   document.getElementById("themeToggle")!.onclick = toggleTheme;
   document.getElementById("installBtn")?.addEventListener("click", () => { deferredInstallPrompt?.prompt(); });
 
-  // Search
+  // ── Search ─────────────────────────────────────────────
   const searchEl = document.getElementById("search") as HTMLInputElement;
-  searchEl.oninput = () => { searchQuery = searchEl.value; const c = document.getElementById("tools")!; c.innerHTML = renderToolsList(getFilteredTools()); bindToolButtons(c); };
+  searchEl.oninput = () => {
+    searchQuery = searchEl.value;
+    const c = document.getElementById("tools")!;
+    c.innerHTML = renderToolsList(getFilteredTools());
+    bindToolButtons(c);
+  };
 
-  // File remove + passwords
-  document.querySelectorAll<HTMLButtonElement>("[data-rm]").forEach(b => { b.onclick = () => removeFile(Number(b.dataset.rm)); });
-  document.querySelectorAll<HTMLInputElement>("[data-pass]").forEach(inp => {
-    inp.oninput = () => { const i = Number(inp.dataset.pass); if (Number.isFinite(i) && files[i]) files[i] = { ...files[i], password: inp.value.trim() }; };
+  // ── IDE panel controls ─────────────────────────────────
+  document.querySelectorAll<HTMLButtonElement>("[data-action='toggleSidebar']").forEach(b => {
+    b.onclick = () => { sidebarCollapsed = !sidebarCollapsed; render(); };
   });
 
-  // Compress
+  document.getElementById("toggleBottomPanel")?.addEventListener("click", () => {
+    bottomPanelCollapsed = !bottomPanelCollapsed; render();
+  });
+  document.getElementById("collapsePanel")?.addEventListener("click", () => {
+    bottomPanelCollapsed = !bottomPanelCollapsed; render();
+  });
+
+  // ── Sidebar resize ──────────────────────────────────────
+  const sidebarResizer = document.getElementById("sidebarResizer");
+  if (sidebarResizer) {
+    sidebarResizer.addEventListener("mousedown", (e) => {
+      if (sidebarCollapsed) return;
+      e.preventDefault();
+      sidebarResizer.classList.add("active");
+      const startX = e.clientX;
+      const startW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w")) || 280;
+      const onMove = (ev: MouseEvent) => {
+        const newW = Math.max(180, Math.min(520, startW + ev.clientX - startX));
+        document.documentElement.style.setProperty("--sidebar-w", newW + "px");
+      };
+      const onUp = () => {
+        sidebarResizer.classList.remove("active");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  }
+
+  // ── Panel resize ────────────────────────────────────────
+  const panelResizer = document.getElementById("panelResizer");
+  if (panelResizer) {
+    panelResizer.addEventListener("mousedown", (e) => {
+      if (bottomPanelCollapsed) return;
+      e.preventDefault();
+      panelResizer.classList.add("active");
+      const startY = e.clientY;
+      const startH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bottom-panel-h")) || 250;
+      const onMove = (ev: MouseEvent) => {
+        const newH = Math.max(80, Math.min(window.innerHeight * 0.65, startH - (ev.clientY - startY)));
+        document.documentElement.style.setProperty("--bottom-panel-h", newH + "px");
+      };
+      const onUp = () => {
+        panelResizer.classList.remove("active");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  }
+
+  // ── Compress ────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-cmpr]").forEach(b => { b.onclick = () => { compressLevel = b.dataset.cmpr as any; render(); }; });
 
-  // Split
+  // ── Split ───────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-splitout]").forEach(b => { b.onclick = () => { splitOutput = b.dataset.splitout as any; render(); }; });
   document.querySelectorAll<HTMLButtonElement>("[data-splitvis]").forEach(b => {
     b.onclick = () => {
       const on = b.dataset.splitvis === "1";
-      if (on && !splitVisualMode) {
-        // Init visual selection from text
-        visualSelectedPages = parsePageList(splitPages);
-        splitVisualMode = true;
-      } else {
-        splitVisualMode = false;
-      }
+      if (on && !splitVisualMode) { visualSelectedPages = parsePageList(splitPages); splitVisualMode = true; }
+      else { splitVisualMode = false; }
       render();
     };
   });
@@ -1048,7 +1186,7 @@ function render() {
     (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
   };
 
-  // PDF2img
+  // ── PDF2img ─────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-imgfmt]").forEach(b => { b.onclick = () => { imgFormat = b.dataset.imgfmt as any; render(); }; });
   const dpiEl = document.getElementById("dpi") as HTMLInputElement | null;
   if (dpiEl) dpiEl.oninput = () => {
@@ -1059,7 +1197,7 @@ function render() {
     (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
   };
 
-  // Rotate
+  // ── Rotate ──────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-rotangle]").forEach(b => { b.onclick = () => { rotateAngle = Number(b.dataset.rotangle) as any; render(); }; });
   document.querySelectorAll<HTMLButtonElement>("[data-rottgt]").forEach(b => { b.onclick = () => { rotateTarget = b.dataset.rottgt as any; render(); }; });
   const rPEl = document.getElementById("rotatePages") as HTMLInputElement | null;
@@ -1071,17 +1209,17 @@ function render() {
     (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
   };
 
-  // img2pdf
+  // ── img2pdf ─────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-img2pdflayout]").forEach(b => { b.onclick = () => { img2pdfLayout = b.dataset.img2pdflayout as any; render(); }; });
 
-  // Protect
+  // ── Protect ─────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-protmode]").forEach(b => { b.onclick = () => { protectMode = b.dataset.protmode as any; render(); }; });
   const np = document.getElementById("newPwd") as HTMLInputElement | null;
   if (np) np.oninput = () => { protectNewPassword = np.value; const h = document.getElementById("pwdHint"); if (h) h.innerHTML = renderVH(validateProtectPassword(protectNewPassword, protectConfirmPassword)); (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun(); };
   const cp = document.getElementById("confirmPwd") as HTMLInputElement | null;
   if (cp) cp.oninput = () => { protectConfirmPassword = cp.value; const h = document.getElementById("pwdHint"); if (h) h.innerHTML = renderVH(validateProtectPassword(protectNewPassword, protectConfirmPassword)); (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun(); };
 
-  // Delete pages
+  // ── Delete pages ────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-deletevis]").forEach(b => {
     b.onclick = () => {
       const on = b.dataset.deletevis === "1";
@@ -1099,7 +1237,7 @@ function render() {
     (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
   };
 
-  // Watermark
+  // ── Watermark ───────────────────────────────────────────
   const wmt = document.getElementById("wmText") as HTMLInputElement | null;
   if (wmt) wmt.oninput = () => { watermarkText = wmt.value; (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun(); };
   const wmo = document.getElementById("wmOpacity") as HTMLInputElement | null;
@@ -1111,7 +1249,7 @@ function render() {
   const wmc = document.getElementById("wmColor") as HTMLInputElement | null;
   if (wmc) wmc.oninput = () => { watermarkColor = wmc.value; };
 
-  // Page numbers
+  // ── Page numbers ────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-pgpos]").forEach(b => { b.onclick = () => { pageNumPosition = b.dataset.pgpos as any; render(); }; });
   const pgs = document.getElementById("pgStart") as HTMLInputElement | null;
   if (pgs) pgs.oninput = () => { pageNumStart = Number(pgs.value)||1; };
@@ -1120,19 +1258,30 @@ function render() {
   const pgsz = document.getElementById("pgSize") as HTMLInputElement | null;
   if (pgsz) pgsz.oninput = () => { pageNumFontSize = Math.max(6, Number(pgsz.value)||11); };
 
-  // Metadata
-  const mts = [["metaTitle",()=>metaTitle=((document.getElementById("metaTitle") as HTMLInputElement)?.value??metaTitle)],["metaAuthor",()=>metaAuthor=((document.getElementById("metaAuthor") as HTMLInputElement)?.value??metaAuthor)],["metaSubject",()=>metaSubject=((document.getElementById("metaSubject") as HTMLInputElement)?.value??metaSubject)],["metaKeywords",()=>metaKeywords=((document.getElementById("metaKeywords") as HTMLInputElement)?.value??metaKeywords)],["metaCreator",()=>metaCreator=((document.getElementById("metaCreator") as HTMLInputElement)?.value??metaCreator)]];
-  mts.forEach(([id, fn]) => { const el = document.getElementById(id as string) as HTMLInputElement | null; if (el) el.oninput = fn as any; });
+  // ── Metadata ────────────────────────────────────────────
+  const mts: [string, () => void][] = [
+    ["metaTitle",    () => metaTitle    = (document.getElementById("metaTitle")    as HTMLInputElement)?.value ?? metaTitle],
+    ["metaAuthor",   () => metaAuthor   = (document.getElementById("metaAuthor")   as HTMLInputElement)?.value ?? metaAuthor],
+    ["metaSubject",  () => metaSubject  = (document.getElementById("metaSubject")  as HTMLInputElement)?.value ?? metaSubject],
+    ["metaKeywords", () => metaKeywords = (document.getElementById("metaKeywords") as HTMLInputElement)?.value ?? metaKeywords],
+    ["metaCreator",  () => metaCreator  = (document.getElementById("metaCreator")  as HTMLInputElement)?.value ?? metaCreator],
+  ];
+  mts.forEach(([id, fn]) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.oninput = fn; });
 
-  // Crop
+  // ── Crop ────────────────────────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-cropunit]").forEach(b => { b.onclick = () => { cropUnit = b.dataset.cropunit as any; render(); }; });
-  [["cropTop",()=>cropTop=Math.max(0,Number((document.getElementById("cropTop") as HTMLInputElement)?.value)||0)],["cropBottom",()=>cropBottom=Math.max(0,Number((document.getElementById("cropBottom") as HTMLInputElement)?.value)||0)],["cropLeft",()=>cropLeft=Math.max(0,Number((document.getElementById("cropLeft") as HTMLInputElement)?.value)||0)],["cropRight",()=>cropRight=Math.max(0,Number((document.getElementById("cropRight") as HTMLInputElement)?.value)||0)]].forEach(([id, fn]) => { const el = document.getElementById(id as string) as HTMLInputElement | null; if (el) el.oninput = fn as any; });
+  const cropFields: [string, () => void][] = [
+    ["cropTop",    () => cropTop    = Math.max(0, Number((document.getElementById("cropTop")    as HTMLInputElement)?.value) || 0)],
+    ["cropBottom", () => cropBottom = Math.max(0, Number((document.getElementById("cropBottom") as HTMLInputElement)?.value) || 0)],
+    ["cropLeft",   () => cropLeft   = Math.max(0, Number((document.getElementById("cropLeft")   as HTMLInputElement)?.value) || 0)],
+    ["cropRight",  () => cropRight  = Math.max(0, Number((document.getElementById("cropRight")  as HTMLInputElement)?.value) || 0)],
+  ];
+  cropFields.forEach(([id, fn]) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.oninput = fn; });
 
-  // Reorder text input
+  // ── Reorder text input ──────────────────────────────────
   const reEl = document.getElementById("reorderInput") as HTMLInputElement | null;
   if (reEl) reEl.oninput = () => {
     reorderInput = reEl.value;
-    // Sync visual order from text if parseable
     const parts = reorderInput.trim().split(",").map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0);
     if (parts.length && new Set(parts).size === parts.length) reorderVisualOrder = parts;
     const v = validateReorderInput(reorderInput);
@@ -1141,7 +1290,7 @@ function render() {
     (document.getElementById("run") as HTMLButtonElement|null)!.disabled = !canRun();
   };
 
-  // Visual select for split/delete
+  // ── Visual page selection (split / deletepages) ─────────
   document.querySelectorAll<HTMLDivElement>(".thumbCard[data-selectpage]").forEach(card => {
     const page = Number(card.dataset.selectpage);
     card.onclick = () => {
@@ -1154,7 +1303,7 @@ function render() {
     };
   });
 
-  // Reorder thumbnail drag
+  // ── Reorder thumbnail drag ──────────────────────────────
   const thumbCards = document.querySelectorAll<HTMLDivElement>(".thumbCard[data-thumbidx]");
   thumbCards.forEach(card => {
     const idx = Number(card.dataset.thumbidx);
@@ -1172,20 +1321,28 @@ function render() {
     };
   });
 
-  // Drop zone
+  // ── Drop zone ───────────────────────────────────────────
   const drop = document.getElementById("drop")!;
   drop.addEventListener("click", () => input.click());
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("dragover"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("dragover"); if (e.dataTransfer?.files) onFilesChosen(e.dataTransfer.files); });
 
-  // Downloads + use as input
+  // ── Downloads + use as input ────────────────────────────
   document.querySelectorAll<HTMLButtonElement>("[data-dl]").forEach(b => {
     b.onclick = () => { const j = jobs.find(j => j.id === b.dataset.dl); if (j?.outputBlob && j.outputName) downloadBlob(j.outputBlob, j.outputName); };
   });
-  document.querySelectorAll<HTMLButtonElement>("[data-useinput]").forEach(b => { b.onclick = () => useJobAsInput(b.dataset.useinput!); });
+  document.querySelectorAll<HTMLButtonElement>("[data-useinput]").forEach(b => {
+    b.onclick = () => useJobAsInput(b.dataset.useinput!);
+  });
 
-  // File reorder drag (merge/img2pdf)
+  // ── File remove + passwords ─────────────────────────────
+  document.querySelectorAll<HTMLButtonElement>("[data-rm]").forEach(b => { b.onclick = () => removeFile(Number(b.dataset.rm)); });
+  document.querySelectorAll<HTMLInputElement>("[data-pass]").forEach(inp => {
+    inp.oninput = () => { const i = Number(inp.dataset.pass); if (Number.isFinite(i) && files[i]) files[i] = { ...files[i], password: inp.value.trim() }; };
+  });
+
+  // ── File reorder drag (merge / img2pdf) ─────────────────
   const rows = document.querySelectorAll<HTMLDivElement>(".fileRow[data-idx]");
   rows.forEach(row => {
     const idx = Number(row.dataset.idx);
@@ -1198,6 +1355,10 @@ function render() {
     row.ondragleave = () => row.classList.remove("dropTarget");
     row.ondrop = (e) => { e.preventDefault(); row.classList.remove("dropTarget"); const from = draggingIdx ?? Number(e.dataTransfer?.getData("text/plain")); draggingIdx = null; if (Number.isFinite(from)) moveFile(Number(from), idx); render(); };
   });
+
+  // ── Restore scroll positions ────────────────────────────
+  const ws = document.getElementById("toolWorkspace"); if (ws) ws.scrollTop = prevWorkspaceScroll;
+  const pb = document.querySelector<HTMLElement>(".panel-body"); if (pb) pb.scrollTop = prevPanelScroll;
 }
 
 // ─── Keyboard shortcuts (one-time setup) ─────────────────
@@ -1212,6 +1373,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape" && !inInput && files.length > 0) clearFiles();
   if (e.key.toLowerCase() === "t" && !inInput) toggleTheme();
+  if (e.key.toLowerCase() === "b" && !inInput) { sidebarCollapsed = !sidebarCollapsed; render(); }
   if ((e.ctrlKey || e.metaKey) && /^[1-9]$/.test(e.key)) {
     const idx = parseInt(e.key) - 1;
     if (TOOLS[idx]) { e.preventDefault(); setActiveTool(TOOLS[idx].id); }
