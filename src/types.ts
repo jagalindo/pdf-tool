@@ -16,9 +16,6 @@ export type ToolId =
 
 export type ToolDef = {
   id: ToolId;
-  title: string;
-  subtitle: string;
-  tags: string[];
   accepts: "pdf" | "image";
   output: "pdf" | "zip" | "txt";
 };
